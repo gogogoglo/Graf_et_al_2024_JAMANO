@@ -1,0 +1,2897 @@
+---
+title: "Framingham Mobility Journal Submission Materials - Updated 12/19/2023"
+author: "Gloria Huei-Jong Graf"
+date: "12/19/2023"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+This document contains code for all mortality analyses, tables, and figures in Graf et al. 2023.
+
+```{r packages, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(foreign)
+library(haven)
+library(kableExtra)
+library(psych)
+library(wesanderson)
+library(patchwork)
+library(survival)
+library(grid)
+library(Gmisc)
+library(glue)
+library(miceadds)
+library(plm)
+library(ggfortify)
+library(CMAverse)
+library(ggpubr)
+```
+
+```{r load-data, include=FALSE}
+#Adding new education/mobility data (from new education data release)
+base_df = read.csv("/Users/gloriagraf/Documents/Research with DB/Framingham Mobility/Data/combined_framingham_data_01252024.csv") %>%
+  mutate(smknow = as.character(smknow),
+         sex = factor(sex, levels = c("1", "2"), labels = c("Male","Female")),
+         mort_status_cat = factor(mort_status, levels = c(0,1), labels = c("No", "Yes")))
+
+# Creating analysis subsets
+DNAm_df =
+  base_df %>%
+  filter(!is.na(DNAmAge))
+
+education_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & !is.na(education_std))
+
+educationoffspring_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & cohort == "Offspring" & !is.na(education_std))
+
+educationGen3_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & cohort == "GEN3" & !is.na(education_std))
+
+mobility_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & !is.na(education_std) & !is.na(maxpared_std))
+
+mobilityoffspring_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & cohort == "Offspring" & !is.na(education_std) & !is.na(maxpared_std))
+
+mobilityGen3_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & cohort == "GEN3" & !is.na(education_std) & !is.na(maxpared_std))
+
+sibling_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & !is.na(education_std) & !is.na(sibgroupid)) %>%
+  group_by(sibgroupid) %>%
+  mutate(famfreq = n()) %>%
+  filter(famfreq >=2)
+
+# Counts for flowcharts
+# table(base_df$cohort)
+# table(subset(base_df, !is.na(education_std))$cohort)
+# table(subset(base_df, !is.na(education_std) & !is.na(maxpared_std))$cohort)
+# table(subset(base_df, !is.na(education_std) & !is.na(maxpared_std) & !is.na(DNAmAge))$cohort)
+
+# mean(mobility_df$rmob_std)
+# sd(mobility_df$rmob_std)
+# 
+# mean(mobility_df$dmob_cont, na.rm = T)
+# 
+# 
+# mean(mobility_df$rmob_std)/sd(mobility_df$rmob_std)
+# 
+# mobility_df %>%
+#   select(birthcohort_5yr, education_cont) %>%
+#   group_by(birthcohort_5yr) %>%
+#   summarize(mean = mean(education_cont, na.rm=T),
+#             sd = sd(education_cont, na.rm=T))
+# 
+# test = lm(dmob_cont ~ rmob_std, mobilityoffspring_df)
+# summary(test)
+
+```
+
+### Main Text: Tables
+
+#### Table 1
+
+```{r echo = FALSE}
+# Lists
+analysis_samples = 
+  list(mobility_df = mobility_df, mobilityoffspring_df = mobilityoffspring_df, mobilityGen3_df = mobilityGen3_df)
+
+cont_summary =
+  function(sample) {
+  mean_age = mean(sample$Age, na.rm = T)
+  sd_age = sd(sample$Age, na.rm = T)
+  mean_poam45 = mean(sample$Dunedin_PoAm45, na.rm = T)
+  sd_poam45 = sd(sample$Dunedin_PoAm45, na.rm = T) 
+  mean_edcont = mean(sample$education_cont, na.rm = T)
+  sd_edcont = sd(sample$education_cont, na.rm = T)  
+  mean_paredcont = mean(sample$maxpared_cont, na.rm = T)
+  sd_paredcont = sd(sample$maxpared_cont, na.rm = T)
+  mean_dmob_cont = mean(sample$dmob_cont, na.rm = T)
+  sd_dmob_cont = sd(sample$dmob_cont, na.rm = T)
+  mean_rmob_cont = mean(sample$rmob_cont, na.rm = T)
+  sd_rmob_cont = sd(sample$rmob_cont, na.rm = T)
+  mean_dmob_std = mean(sample$dmob_std, na.rm = T)
+  sd_dmob_std = sd(sample$dmob_std, na.rm = T)
+  mean_rmob_std = mean(sample$rmob_std, na.rm = T)
+  sd_rmob_std = sd(sample$rmob_std, na.rm = T)
+
+  tibble(
+    mean_age = mean_age, 
+    sd_age = sd_age,
+    mean_poam45 = mean_poam45, 
+    sd_poam45 = sd_poam45,
+    mean_edcont = mean_edcont,
+    sd_edcont = sd_edcont,
+    mean_paredcont = mean_paredcont,
+    sd_paredcont = sd_paredcont,
+    mean_dmob_cont = mean_dmob_cont,
+    sd_dmob_cont = sd_dmob_cont,
+    mean_rmob_cont = mean_rmob_cont,
+    sd_rmob_cont = sd_rmob_cont,
+    mean_dmob_std = mean_dmob_std,
+    sd_dmob_std = sd_dmob_std,
+    mean_rmob_std = mean_rmob_std,
+    sd_rmob_std = sd_rmob_std)
+  
+  }
+
+output_cont = 
+  map_dfr(analysis_samples, cont_summary, .id = "variable") %>%
+  mutate(
+    mean_age = round(mean_age, 2),
+    sd_age = round(sd_age, 2),
+    age_mean_sd = paste(mean_age," (",sd_age,")", sep = ""),
+    mean_poam45 = round(mean_poam45, 2),
+    sd_poam45 = round(sd_poam45, 2),
+    poam45_mean_sd = paste(mean_poam45," (",sd_poam45,")", sep = ""),
+    mean_edcont = round(mean_edcont, 2),
+    sd_edcont = round(sd_edcont, 2),
+    edcont_mean_sd = paste(mean_edcont," (",sd_edcont,")", sep = ""),
+    mean_paredcont = round(mean_paredcont, 2),
+    sd_paredcont = round(sd_paredcont, 2),
+    paredcont_mean_sd = paste(mean_paredcont," (",sd_paredcont,")", sep = ""),
+    mean_dmob_cont = round(mean_dmob_cont, 2),
+    sd_dmob_cont = round(sd_dmob_cont, 2),
+    dmobcont_mean_sd = paste(mean_dmob_cont," (",sd_dmob_cont,")", sep = ""),
+    mean_rmob_cont = round(mean_rmob_cont, 2),
+    sd_rmob_cont = round(sd_rmob_cont, 2),
+    rmobcont_mean_sd = paste(mean_rmob_cont," (",sd_rmob_cont,")", sep = ""),
+    mean_dmob_std = round(mean_dmob_std, 2),
+    sd_dmob_std = round(sd_dmob_std, 2),
+    dmobstd_mean_sd = paste(mean_dmob_std," (",sd_dmob_std,")", sep = ""),
+    mean_rmob_std = round(mean_rmob_std, 2),
+    sd_rmob_std = round(sd_rmob_std, 2),
+    rmobstd_mean_sd = paste(mean_rmob_std," (",sd_rmob_std,")", sep = ""),
+    ) %>%
+  dplyr::select(variable, 
+                age_mean_sd, poam45_mean_sd, edcont_mean_sd, paredcont_mean_sd, dmobcont_mean_sd, rmobcont_mean_sd,  
+                dmobstd_mean_sd, rmobstd_mean_sd) %>%
+  rename(sample = variable) %>%
+  pivot_longer(c(age_mean_sd:rmobstd_mean_sd), names_to = "variable", values_to = "mean_sd") %>%
+  separate(variable, c("variable", "mean", "sd")) %>%
+  select(-mean, -sd) %>%
+  pivot_wider(names_from = sample, values_from = mean_sd)
+
+cat_summary =
+  function(sample) {
+  race_dist = prop.table(table(sample$race_char, useNA = "ifany")) %>% 
+    as.data.frame() %>%
+    pivot_wider(names_from = "Var1", values_from = "Freq")
+  sex_dist = prop.table(table(sample$sex, useNA = "no")) %>% 
+    as.data.frame() %>%
+    pivot_wider(names_from = "Var1", values_from = "Freq")
+  mort_dist = prop.table(table(sample$mort_status_cat, useNA = "no")) %>% 
+    as.data.frame() %>%
+    pivot_wider(names_from = "Var1", values_from = "Freq")
+  n = count(sample) %>%
+    as.data.frame()
+  colnames(n) = c("n")
+  n_fam = length(unique(sample$sibgroupid)) %>%
+    as.data.frame()
+  colnames(n_fam) = c("nfam")
+
+  bind_cols(race_dist, sex_dist, mort_dist, n, n_fam)
+  
+  }
+
+output_cat = 
+  map_dfr(analysis_samples, cat_summary, .id = "variable") %>%
+  rename(sample = variable) %>%
+  mutate_if(is.numeric, ~100*(.)) %>%
+  mutate(n = n/100,
+        nfam = nfam/100) %>%
+  mutate_if(is.numeric, ~round(.,0)) %>%
+  dplyr::select(sample, White, Male, Female, Yes, n, nfam) %>%
+  rename(Died = Yes,
+         `No. families` = nfam,
+         `No. individuals` = n) %>%
+  pivot_longer(c(`White`:`No. families`), names_to = "variable", values_to = "value") %>%
+  mutate(value = ifelse(value == 1, "",
+                  ifelse(value < 200, paste(value, "%", sep=""), value))) %>%
+  mutate(value = ifelse(value == "47%", "1455 (47%)",
+                    ifelse(value == "53%", "1646 (53%)",
+                  ifelse(value == "46%", "764 (46%)",
+                    ifelse(value == "54%", "888 (54%)",
+                  ifelse(value == "48%", "691 (48%)",
+                    ifelse(value == "52%", "758 (52%)",
+                  ifelse(value == "14%", "419 (14%)", 
+                  ifelse(value == "24%", "402 (24%)", value))))))))) %>%
+  mutate(value = ifelse(value == "99%" & sample == "mobility_df", "3062 (99%)",
+                  ifelse(value == "99%" & sample == "mobilityoffspring_df", "1629 (99%)",
+                  ifelse(value == "99%" & sample == "mobilityGen3_df", "1433 (99%)", value)))) %>%
+  pivot_wider(names_from = sample, values_from = value)
+
+table1 =
+  rbind(output_cont, output_cat) %>%
+  mutate(variable =
+          ifelse(variable == "age", "Age",
+          ifelse(variable == "poam45", "DunedinPACE",
+          ifelse(variable == "horvath", "Horvath Clock",
+          ifelse(variable == "hannum", "Hannum Clock",
+          ifelse(variable == "phenoage", "PhenoAge Clock",
+          ifelse(variable == "grimage", "GrimAge Clock",
+          ifelse(variable == "edcont", "Education (years)",
+          ifelse(variable == "paredcont", "Parental Education (years)",
+          ifelse(variable == "dmobcont", "Ed. Mobility (Delta, years)",
+          ifelse(variable == "rmobcont", "Ed. Mobility (RC, years)",
+          ifelse(variable == "dmobstd", "Ed. Mobility (Delta, standardized)",
+          ifelse(variable == "rmobstd", "Ed. Mobility (RC, standardized)",
+                 variable))))))))))))) %>%
+  mutate(mobility_df = ifelse(mobility_df == "NA (NA)", "", mobility_df),
+         mobilityoffspring_df = ifelse(mobilityoffspring_df == "NA (NA)", "", mobilityoffspring_df),
+         mobilityGen3_df = ifelse(mobilityGen3_df == "NA (NA)" | mobilityGen3_df == "1%", "", mobilityGen3_df)) %>%
+  mutate(variable = factor(variable, levels = c("No. families", "No. individuals", "Age", "White",  "Male", "Female", "Died", 
+                                                "Mean Follow-up (years)",
+                                                "Education (years)", "Parental Education (years)",
+                                                "Ed. Mobility (Delta, years)", "Ed. Mobility (RC, years)",
+                                                "Ed. Mobility (Delta, standardized)", "Ed. Mobility (RC, standardized)",
+                                                "DunedinPACE"))) %>%
+  arrange(variable)
+
+colnames(table1) <- c("", "Analytic Sample (n=3101)", "Offspring sample (n=1652)", "Gen3 Sample (n=1449)")
+
+table1 %>%
+  knitr::kable(align = "lccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0,bold=TRUE)
+```
+
+### Main Text: Figures
+
+#### Figure 1: Participant Flow Diagrams
+
+Offspring Cohort Sample
+
+```{r echo = F}
+offspring_cohort <- boxGrob(glue("Offspring cohort sample",
+                           "n = {pop}",
+                           pop = txtInt(5211),
+                           .sep = "\n"))
+
+missinged_offspring <- boxGrob(glue("Missing own or parental education data",
+                           "n = {pop}",
+                           pop = txtInt(2262),
+                           .sep = "\n"))
+
+offspringmobility_cohort <- boxGrob(glue("Offspring Mobility Subsample",
+                           "n = {pop}",
+                           pop = txtInt(2949),
+                           .sep = "\n"))
+
+missingdnam_offspring <- boxGrob(glue("Missing DNAm data",
+                           "n = {pop}",
+                           pop = txtInt(1297),
+                           .sep = "\n"))
+
+offspringdnam_cohort <- boxGrob(glue("DNAm-mobility Subsample",
+                           "n = {pop}",
+                           pop = txtInt(1652),
+                           .sep = "\n"))
+
+grid.newpage()
+vert <- spreadVertical(offspring_cohort = offspring_cohort,
+                       offspringmobility_cohort = offspringmobility_cohort,
+                       offspringdnam_cohort = offspringdnam_cohort)
+exclude1 <- moveBox(missinged_offspring,
+                    x = .8,
+                    y = .7)
+exclude2 <- moveBox(missingdnam_offspring,
+                    x = .8,
+                    y = .3)
+
+for (i in 1:(length(vert) - 1)) {
+  connectGrob(vert[[i]], vert[[i + 1]], type = "vert") %>%
+    print
+}
+
+connectGrob(vert$offspring_cohort, exclude1, type = "L")
+connectGrob(vert$offspringmobility_cohort, exclude2, type = "L")
+vert
+exclude1
+exclude2
+```
+
+Gen3 Cohort Sample
+
+```{r echo = F}
+Gen3_cohort <- boxGrob(glue("Gen3 cohort sample",
+                           "n = {pop}",
+                           pop = txtInt(4095),
+                           .sep = "\n"))
+
+missingpared_Gen3 <- boxGrob(glue("Missing own or parental education data",
+                           "n = {pop}",
+                           pop = txtInt(234),
+                           .sep = "\n"))
+
+Gen3mobility_cohort <- boxGrob(glue("Gen3 Mobility Subsample",
+                           "n = {pop}",
+                           pop = txtInt(3861),
+                           .sep = "\n"))
+
+missingdnam_Gen3 <- boxGrob(glue("Missing DNAm data",
+                           "n = {pop}",
+                           pop = txtInt(2412),
+                           .sep = "\n"))
+
+Gen3dnam_cohort <- boxGrob(glue("DNAm-mobility Subsample",
+                           "n = {pop}",
+                           pop = txtInt(1449),
+                           .sep = "\n"))
+
+grid.newpage()
+vert <- spreadVertical(Gen3_cohort = Gen3_cohort,
+                       Gen3mobility_cohort = Gen3mobility_cohort,
+                       Gen3dnam_cohort = Gen3dnam_cohort)
+exclude1 <- moveBox(missingpared_Gen3,
+                    x = .8,
+                    y = .7)
+exclude2 <- moveBox(missingdnam_Gen3,
+                    x = .8,
+                    y = .3)
+
+for (i in 1:(length(vert) - 1)) {
+  connectGrob(vert[[i]], vert[[i + 1]], type = "vert") %>%
+    print
+}
+
+connectGrob(vert$Gen3_cohort, exclude1, type = "L")
+connectGrob(vert$Gen3mobility_cohort, exclude2, type = "L")
+vert
+exclude1
+exclude2
+```
+
+#### Figure 2: Effect-sizes
+
+```{r echo = FALSE}
+mobilityBA =
+  mobility_df %>%
+  dplyr::select(dbGaP_Subject_ID, rmob_std, Dunedin_PoAm45, cohort) %>%
+  rename(Cohort = cohort) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(rmob_std, Dunedin_PoAm45, group = Cohort, color = Cohort)) +
+  geom_jitter(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  scale_color_manual(values = c("#B12A90FF", "#FCA636FF")) +
+  labs(title="", x = "Educational mobility (RC)", y = "DunedinPACE") +
+  xlim(-3,3) +
+  ylim(-3,4)
+
+sibdiffBA =
+  sibling_df %>%
+  ungroup() %>%
+  dplyr::select(dbGaP_Subject_ID, education_std, avg_sib_edu, Dunedin_PoAm45, cohort) %>%
+  rename(Cohort = cohort) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45),
+         sibdiff = education_std - avg_sib_edu) %>%
+  ggplot(aes(sibdiff, Dunedin_PoAm45, group = Cohort, color = Cohort)) +
+  geom_jitter(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  scale_color_manual(values = c("#B12A90FF", "#FCA636FF")) +
+  labs(title="", x = "Sib. Diff. (standardized)", y = "DunedinPACE") +
+  xlim(-3,3) +
+  ylim(-3,4)
+
+ES_df =
+  data.frame(
+    var = c("Ed. Mobility (RC)", "Sib. Diff. (std)", "Ed. Mobility (RC)", "Sib. Diff. (std)"),
+    cohort = c("Offspring", "Offspring", "GEN3", "GEN3"),
+    ES = c(-0.18, -0.22, -0.22, -0.25),
+    CI_lower = c(-0.23, -0.29, -0.27, -0.31),
+    CI_upper = c(-0.13, -0.14, -0.16, -0.18)
+  )
+
+ES_comparison =
+  ES_df %>%
+  rename(Cohort = cohort) %>%
+  mutate(var = factor(var, levels = c("Ed. Mobility (RC)", "Sib. Diff. (std)"))) %>%
+  ggplot(aes(x = var, fill = Cohort)) +
+  geom_bar(aes(y=ES, color = Cohort), stat = "identity", position=position_dodge(), width = 0.6) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, group = Cohort), stat = "identity", position=position_dodge(0.6), width = 0.3) +
+  theme_minimal() +
+  scale_color_manual(values = c("#B12A90FF", "#FCA636FF")) +
+  scale_fill_manual(values = c("#B12A90FF", "#FCA636FF")) +
+  labs(title="", x = "", y = "DunedinPACE") +
+  coord_fixed(10)
+
+(mobilityBA / sibdiffBA) + plot_layout(guides = "collect") 
+
+ES_comparison
+
+ggsave(ES_comparison, filename = "Fig2.eps", device = "eps")
+```
+
+#### Figure 2: Survival Curves
+
+```{r echo = FALSE, message = FALSE}
+mortality_df = 
+  mobility_df %>%
+  dplyr::mutate(pace_cat = ifelse(Dunedin_PoAm45 < 0.9580062, "Slow",
+                        ifelse(Dunedin_PoAm45 > 1.202686, "Fast", "Average")),
+                mob_cat = ifelse(rmob_std < -0.7834051, "Downward",
+                        ifelse(rmob_std > 0.9702573, "Upward", "Stable"))) %>%
+  dplyr::mutate(pace_cat = factor(pace_cat, levels = c("Slow", "Average", "Fast")),
+                mob_cat = factor(mob_cat, levels = c("Downward", "Stable", "Upward")))
+
+#Bioage-mort
+BAmort_model = survfit(Surv(T_mort, mort_status) ~ pace_cat, data = mortality_df)
+BAmort_plot =
+  autoplot(BAmort_model) +
+  theme_minimal() +
+  xlab("Years") +
+  ylab("Survival") +
+  labs(title = "DunedinPACE") +
+  # ylim(0.5,1) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_colour_manual(values = c("dodgerblue3", "darkgrey", "firebrick2")) +
+  scale_fill_manual(values = c("dodgerblue3", "darkgrey", "firebrick2")) +
+  labs(colour = "DunedinPACE", fill = "DunedinPACE")
+
+#Mobility-mort
+mobmort_model = survfit(Surv(T_mort, mort_status) ~ mob_cat, data = mortality_df)
+mobmort_plot =
+  autoplot(mobmort_model) +
+  theme_minimal() +
+  xlab("Years") +
+  ylab("Survival") +
+  labs(title = "Educational Mobility (RC)") +
+  # ylim(0.5,1) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_colour_manual(values = c("firebrick2", "darkgrey", "dodgerblue3")) +
+  scale_fill_manual(values = c("firebrick2", "darkgrey", "dodgerblue3")) +
+  labs(colour = "Educational Mobility", fill = "Educational Mobility")
+
+suppressWarnings(print(BAmort_plot + mobmort_plot + plot_layout(guides = "collect")))
+```
+
+### Supplementary Material: Tables
+
+#### Table S1. Regression of DunedinPACE measures on educational attainment and educational mobility
+
+```{r echo = FALSE}
+offspringeducation_df =
+  base_df %>%
+  filter(cohort == "Offspring" & !is.na(education_std))
+
+Gen3education_df =
+  base_df %>%
+  filter(cohort == "GEN3" & !is.na(education_std))
+
+offspringmobility_df =
+  base_df %>%
+  filter(cohort == "Offspring" & !is.na(rmob_std))
+
+Gen3mobility_df =
+  base_df %>%
+  filter(cohort == "GEN3" & !is.na(rmob_std))
+
+# Writing function
+edpoa_reg <- function(bioage_measure, ed_var, sample) {
+  
+  object = lm.cluster(scale(pull(sample, bioage_measure)) ~ pull(sample, ed_var) + Age + sex, data = sample, cluster = "sibgroupid")
+    
+  reg_output =
+    summary(object$lm_res) %>% 
+    broom::tidy() %>%
+    mutate(conf.low = estimate - (1.96*std.error),
+           conf.high = estimate + (1.96*std.error)) %>%
+    filter(term == "pull(sample, ed_var)") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    obj2 = nobs(object$lm_res) %>% as.data.frame()
+    colnames(obj2) <- c("N")
+
+    cbind(reg_output, obj2)
+    
+}
+  
+# Create input list
+BA_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid")
+edvar_list = list(education_std = "education_std", maxpared_std = "maxpared_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+sample_list = list(offspringmobility_df = offspringmobility_df, Gen3mobility_df = Gen3mobility_df)
+samplename_list = list("Offspring" = "Offspring", "Gen3" = "Gen3")
+
+edpoa_reg_list = 
+  list(BA_list = BA_list, edvar_list = edvar_list, sample_list = sample_list)
+edpoa_reg_listcombo = 
+  cross_df(edpoa_reg_list)
+
+edpoa_reg_namelist = 
+  list(BA_list = BA_list, edvar_list = edvar_list, samplename_list = samplename_list)
+edpoa_reg_namelistcombo = 
+  cross_df(edpoa_reg_namelist)
+
+# Apply function
+edpoa_reg_output =
+  pmap_dfr(list(edpoa_reg_listcombo$BA_list, edpoa_reg_listcombo$edvar_list, edpoa_reg_listcombo$sample_list), edpoa_reg) %>%
+  cbind(edpoa_reg_namelistcombo) %>%
+  dplyr::select(samplename_list, BA_list, edvar_list, everything()) %>%
+  dplyr::mutate(BA_list = ifelse(BA_list == "Dunedin_PoAm45", "DunedinPACE", 
+                          ifelse(BA_list == "DNAmAge_resid", "Horvath Clock",        
+                          ifelse(BA_list == "DNAmAgeHannum_resid", "Hannum Clock", 
+                          ifelse(BA_list == "DNAmPhenoAge_resid", "PhenoAge Clock", 
+                          ifelse(BA_list == "DNAmGrimAge_resid", "GrimAge Clock", NA)))))) %>%
+  mutate(BA_list = factor(BA_list, levels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock"))) %>%
+  rename("Cohort" = samplename_list,
+         "Outcome" = BA_list,
+         "Predictor" = edvar_list,
+         "ES" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("education_std", "maxpared_std", "dmob_std", "rmob_std"), labels = c("Educational Attainment", "Parental Education", "Mobility (Delta)", "Mobility (RC)"))) %>%
+  arrange(desc(Cohort), Outcome, Predictor) %>%
+  pivot_wider(names_from = Cohort, values_from = c(ES, CI, p, N)) %>%
+  dplyr::select(Outcome, Predictor, ends_with("Offspring"), ends_with("Gen3"))
+  
+edpoa_reg_output %>%
+  select(-Outcome, -N_Offspring, -N_Gen3) %>%
+  knitr::kable(col.names = c("Predictor", "ES", "CI", "p", "ES", "CI", "p"), align = "lcccccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  add_header_above(c(" " = 1, "Offspring (n=1652)" = 3, "Gen3 (n=1449)" = 3), bold = T) %>%
+  pack_rows("DunedinPACE", 1, 4) %>%
+  pack_rows("Horvath Clock", 5, 8) %>%
+  pack_rows("Hannum Clock", 9, 12) %>%
+  pack_rows("PhenoAge Clock", 13, 16) %>%
+  pack_rows("GrimAge Clock", 17, 20)
+```
+
+#### Table S2. Regression of DunedinPACE measures on educational attainment and educational mobility
+
+Fixed-effects regression of educational attainment (z-score) on DunedinPACE
+
+```{r echo = FALSE}
+# Filter base dataset to all those with methylation data and own education measures (n=2437, n=1096 Offspring, n=1341 Gen3)
+sibling_df = 
+  sibling_df %>%
+  mutate(dbGaP_Subject_ID = as.character(dbGaP_Subject_ID),
+         sibgroupid = as.character(sibgroupid))
+
+sibling_df_offspring =
+  sibling_df %>%
+  filter(cohort == "Offspring")
+
+sibling_df_Gen3 = 
+  sibling_df %>%
+  filter(cohort == "GEN3")
+
+#Writing function
+fixedeffects_reg <- function(bioage_measure, sample) {
+  
+  object = plm(scale(pull(sample, education_std)) ~ scale(pull(sample, bioage_measure)) + Age + sex, 
+               data = sample, 
+               index = c("sibgroupid"), 
+               model = "within",
+                effect = "twoways")
+    
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T) %>%
+    filter(term == "scale(pull(sample, bioage_measure))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    obj2 = pdim(object)$nT$N %>% as.data.frame()
+    colnames(obj2) <- c("N")
+    
+    obj3 = pdim(object)$nT$n %>% as.data.frame()
+    colnames(obj3) <- c("n")
+
+    cbind(reg_output, obj2, obj3)
+    
+}
+
+# Create input list
+BA_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid")
+sample_list = list(sibling_df = sibling_df, sibling_df_offspring = sibling_df_offspring, sibling_df_Gen3 = sibling_df_Gen3)
+samplename_list = list("Overall" = "Overall", "Offspring" = "Offspring", "Gen3" = "Gen3")
+
+fixedeffects_reg_list = 
+  list(BA_list = BA_list, sample_list = sample_list)
+fixedeffects_reg_listcombo = 
+  cross_df(fixedeffects_reg_list)
+
+fixedeffects_reg_namelist = 
+  list(BA_list = BA_list, samplename_list = samplename_list)
+fixedeffects_reg_namelistcombo = 
+  cross_df(fixedeffects_reg_namelist)
+
+# Apply function
+fixedeffects_reg_output =
+  pmap_dfr(list(fixedeffects_reg_listcombo$BA_list, fixedeffects_reg_listcombo$sample_list), fixedeffects_reg) %>%
+  cbind(fixedeffects_reg_namelistcombo) %>%
+  dplyr::select(samplename_list, BA_list, N, n, everything()) %>%
+  dplyr::mutate(BA_list = ifelse(BA_list == "Dunedin_PoAm45", "DunedinPACE", 
+                          ifelse(BA_list == "DNAmAge_resid", "Horvath Clock",        
+                          ifelse(BA_list == "DNAmAgeHannum_resid", "Hannum Clock", 
+                          ifelse(BA_list == "DNAmPhenoAge_resid", "PhenoAge Clock", 
+                          ifelse(BA_list == "DNAmGrimAge_resid", "GrimAge Clock", NA)))))) %>%
+  mutate(BA_list = factor(BA_list, levels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock"))) %>%
+  arrange(desc(samplename_list), BA_list) %>%
+  rename("Cohort" = samplename_list,
+         "Outcome" = "BA_list",
+         "ES" = estimate,
+         "p" = p.value) 
+  
+fixedeffects_reg_output %>%
+  select(-Cohort, -N, -n) %>%
+  knitr::kable(align = "lcccc", caption = "Fixed-effects regression of educational attainment (z-score) on DunedinPACE") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  pack_rows("Overall (N=2437, n=887)", 1, 5) %>%
+  pack_rows("Offspring (N=1096, n=448)", 6, 10) %>%
+  pack_rows("Gen3 (N=1341, n=439)", 11, 15)
+```
+
+Effect-sizes of education on aging (Note that first 3 columns are conducted using linear regression with cluster SEs, while the last column is a fixed-effect regression model showing within-family effects).
+
+```{r echo = F}
+# Writing function
+comped_reg <- function(bioage_measure, ed_var, sample) {
+  
+  object = lm.cluster(scale(pull(sample, bioage_measure)) ~ pull(sample, ed_var) + Age + sex, data = sample, cluster = "sibgroupid")
+    
+  reg_output =
+    summary(object$lm_res) %>% 
+    broom::tidy() %>%
+    mutate(conf.low = estimate - (1.96*std.error),
+           conf.high = estimate + (1.96*std.error)) %>%
+    filter(term == "pull(sample, ed_var)") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    obj2 = nobs(object$lm_res) %>% as.data.frame()
+    colnames(obj2) <- c("n")
+
+    cbind(reg_output, obj2)
+    
+}
+  
+# Create input list
+BA_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+edvar_list = list(education_std = "education_std", dmob_cont = "dmob_cont", rmob_cont = "rmob_cont", dmob_cont = "dmob_std", rmob_std = "rmob_std")
+sample_list = list(offspringeducation_df = offspringeducation_df, Gen3education_df = Gen3education_df)
+samplename_list = list("Offspring" = "Offspring", "Gen3" = "Gen3")
+
+comped_reg_list = 
+  list(BA_list = BA_list, edvar_list = edvar_list, sample_list = sample_list)
+comped_reg_listcombo = 
+  cross_df(comped_reg_list)
+
+comped_reg_namelist = 
+  list(BA_list = BA_list, edvar_list = edvar_list, samplename_list = samplename_list)
+comped_reg_namelistcombo = 
+  cross_df(comped_reg_namelist)
+
+# Apply function
+comped_reg_output =
+  pmap_dfr(list(comped_reg_listcombo$BA_list, comped_reg_listcombo$edvar_list, comped_reg_listcombo$sample_list), comped_reg) %>%
+  cbind(comped_reg_namelistcombo) %>%
+  dplyr::select(samplename_list, BA_list, edvar_list, n, estimate, CI) %>%
+  rename("Cohort" = samplename_list,
+         "BioAge measure" = BA_list,
+         "Predictor" = edvar_list,
+         "ES" = estimate) %>%
+  mutate(Predictor = factor(Predictor, levels = c("education_std", "dmob_cont", "rmob_cont", "dmob_std", "rmob_std"), labels = c("Educational Attainment", "Mobility (Delta, years)", "Mobility (RC, years)", "Mobility (Delta)", "Mobility (RC)")),
+          `BioAge measure` = factor(`BioAge measure`, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock*"))) %>%
+  arrange(desc(Cohort)) %>%
+  pivot_wider(names_from = Predictor, values_from = c(n, ES, CI)) %>%
+  dplyr::select(Cohort, `BioAge measure`, ends_with("Attainment"), ends_with("Delta, years)"), ends_with("RC, years)"), ends_with("Delta)"), ends_with("RC)"))
+```
+
+```{r echo = FALSE}
+#Writing function
+compfix_reg <- function(bioage_measure, sample) {
+  
+  object = plm(scale(pull(sample, education_std)) ~ scale(pull(sample, bioage_measure)) + Age + sex, 
+               data = sample, 
+               index = c("sibgroupid"), 
+               model = "within",
+                effect = "twoways")
+    
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T) %>%
+    filter(term == "scale(pull(sample, bioage_measure))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    obj2 = pdim(object)$nT$N %>% as.data.frame()
+    colnames(obj2) <- c("N")
+    
+    obj3 = pdim(object)$nT$n %>% as.data.frame()
+    colnames(obj3) <- c("n")
+
+    cbind(reg_output, obj2, obj3)
+    
+}
+
+# Create input list
+BA_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+sample_list = list(sibling_df_offspring = sibling_df_offspring, sibling_df_Gen3 = sibling_df_Gen3)
+samplename_list = list("Offspring" = "Offspring", "Gen3" = "Gen3")
+
+compfix_reg_list = 
+  list(BA_list = BA_list, sample_list = sample_list)
+compfix_reg_listcombo = 
+  cross_df(compfix_reg_list)
+
+compfix_reg_namelist = 
+  list(BA_list = BA_list, samplename_list = samplename_list)
+compfix_reg_namelistcombo = 
+  cross_df(compfix_reg_namelist)
+
+# Apply function
+compfix_reg_output =
+  pmap_dfr(list(compfix_reg_listcombo$BA_list, compfix_reg_listcombo$sample_list), compfix_reg) %>%
+  cbind(compfix_reg_namelistcombo) %>%
+  dplyr::select(samplename_list, BA_list, N, n, estimate, CI) %>%
+  rename("Cohort" = samplename_list,
+         `BioAge measure` = "BA_list",
+         "ES" = estimate) %>%
+  mutate(`BioAge measure` = factor(`BioAge measure`, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock*")))
+```
+
+```{r echo = F, message = F}
+comp_output =
+  left_join(comped_reg_output, compfix_reg_output)
+
+comp_output %>%
+  dplyr::select(-Cohort) %>%
+  knitr::kable(col.names = c("", "n", "ES", "CI", "n", "ES", "CI", "n", "ES", "CI", "n", "ES", "CI", "n", "ES", "CI", "N", "n", "ES", "CI"), align = "lcccccccccccccccccccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  add_header_above(c(" " = 1, "Education" = 3, "Ed. Mobility (Delta, years)" = 3, "Ed. Mobility (RC, years)" = 3, "Ed. Mobility (Delta)" = 3, "Ed. Mobility (RC)" = 3,  "Sibling diff." = 4), bold = T) %>%
+  pack_rows(index = c("Offspring Cohort" = 5, "Gen3 Cohort" = 5))
+```
+
+#### Table S3. Survival analysis by educational attainment, educational mobility, and bioage
+
+Mortality
+
+```{r echo = FALSE}
+edmort_df =
+  education_df %>%
+  filter(cohort == "Offspring", !is.na(T_mort), !is.na(mort_status)) 
+
+mobmort_df =
+  mobility_df %>%
+  filter(cohort == "Offspring", !is.na(T_mort), !is.na(mort_status))
+
+
+coxph(Surv(T_mort, mort_status) ~ rmob_std + Age + sex, data = mobmort_df)
+
+# Writing function
+surv_reg_raw <- function(sample, pred_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(sample, pred_var)) + Age + sex, data = sample)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(sample, pred_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+sample_list = list(edmort_df = edmort_df, mobmort_df = mobmort_df)
+samplename_list = list("Offspring Education Sample" = "Education Sample", "Mediation Sample" = "Mediation Sample")
+pred_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid", education_std = "education_std", maxpared_std = "maxpared_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+
+demsurv_reg_list = 
+  list(sample_list = sample_list, pred_list = pred_list)
+demsurv_reg_listcombo = 
+  cross_df(demsurv_reg_list)
+
+demsurv_reg_namelist = 
+  list(samplename_list = samplename_list, pred_list = pred_list)
+demsurv_reg_namelistcombo = 
+  cross_df(demsurv_reg_namelist)
+
+pmap_dfr(list(demsurv_reg_listcombo$sample_list, demsurv_reg_listcombo$pred_list), surv_reg_raw) %>%
+  cbind(demsurv_reg_namelistcombo) %>%
+  select(samplename_list, pred_list, N, Events, estimate, CI, p.value) %>%
+  rename("Predictor" = pred_list,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid", "education_std", "maxpared_std", "dmob_std", "rmob_std"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock", "Educational Attainment", "Parental Education", "Mobility (Delta)", "Mobility (RC)"))) %>%
+  arrange(Predictor, samplename_list) %>%
+  filter((samplename_list == "Mediation Sample")|
+          (samplename_list == "Education Sample" & Predictor %in% c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock")) |
+           (samplename_list == "Education Sample" & Predictor == "Educational Attainment")
+           ) %>%
+  arrange(samplename_list, Predictor) %>%
+  select(-N, -Events) %>%
+  pivot_wider(names_from = samplename_list, values_from = c(HR, CI, p)) %>%
+  replace(is.na(.), "--") %>%
+  select(Predictor, `HR_Education Sample`, `CI_Education Sample`, `p_Education Sample`,
+         `HR_Mediation Sample`, `CI_Mediation Sample`, `p_Mediation Sample`) %>%
+  knitr::kable(align = "lcccccc", col.names = c("Predictor", "HR", "CI", "p", "HR", "CI", "p")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  pack_rows("Biological aging measures", 1, 5) %>%
+  pack_rows("Education measures", 6, 9) %>%
+  add_header_above(c(" " = 1, "Offspring Education Sample (n=2411, 607 deaths)" = 3, "Mediation Sample (n=1648, 402 deaths)" = 3), bold = T)
+```
+
+#### Table S4. Mediation analysis
+
+Mortality - attainment (primary)
+
+```{r echo = F, include = F}
+base_offspring_df =
+  offspringmobility_df %>%
+  filter(cohort == "Offspring")
+
+med_fn = function(BAmeasure){
+  
+  step1 =
+     cmest(
+       data = base_offspring_df,
+       model = "rb",
+       full = TRUE,
+       inference = "bootstrap",
+       outcome = "T_mort",
+       event = "mort_status",
+       exposure = "education_std",
+       mediator = BAmeasure,
+       EMint = TRUE,
+       basec = c("Age", "sex"),
+       mreg = list("linear"),
+       yreg = "coxph",
+       mval = list(0),
+       astar = 0,
+       a = 1,
+       basecval = NULL,
+       nboot = 50,
+       multimp = FALSE
+     )
+
+out =
+  rbind(step1$effect.pe, step1$effect.ci.low, step1$effect.ci.high) %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  dplyr::select(rte, rcde, rpnde, rtnie, rtnde, rpnie, pm) %>%
+  t() %>%
+  as.data.frame()
+
+ colnames(out) = c("estimate", "lowerCI", "upperCI")
+
+ test =
+   out %>%
+   rownames_to_column() %>%
+   mutate(estimate = format(round(estimate, digits = 2), nsmall = 2),
+          lowerCI = format(round(lowerCI, digits = 2), nsmall = 2),
+          upperCI = format(round(upperCI, digits = 2), nsmall = 2)
+      ) %>%
+   mutate(CI = paste("(",lowerCI,",",upperCI,")", sep = "")) %>%
+   rename(effect = rowname) %>%
+   dplyr::select(effect, estimate, CI) %>%
+   pivot_wider(names_from = effect, values_from = c(estimate, CI))
+
+  n = nobs(step1$reg.output$yreg)
+  
+  cbind(test, n)
+  
+}
+
+
+BAmeasure_list = c(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+attain_output = 
+  map_df(BAmeasure_list, med_fn, .id = "bioage_measure") 
+
+attain_output =
+  attain_output %>%
+  dplyr::mutate(bioage_measure =
+          ifelse(bioage_measure == "Dunedin_PoAm45", "DunedinPACE",
+          ifelse(bioage_measure == "DNAmAge_resid", "Horvath Clock",
+          ifelse(bioage_measure == "DNAmAgeHannum_resid", "Hannum Clock",
+          ifelse(bioage_measure == "DNAmPhenoAge_resid", "PhenoAge Clock",
+          ifelse(bioage_measure == "DNAmGrimAge_resid", "GrimAge Clock", bioage_measure)))))) %>%
+  dplyr::select(-n) %>%
+  pivot_longer(c(estimate_rte:CI_pm)) %>%
+  separate(name, into = c("estimate", "effect")) %>%
+  pivot_wider(names_from = "estimate", values_from = "value")
+
+options(knitr.kable.NA = '')
+```
+
+```{r echo = FALSE}
+attain_output %>%
+  mutate(estimate = as.numeric(estimate)) %>%
+  knitr::kable(col.names = c("Biological Aging Measure", "Effect", "Estimate", "CI")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0,bold=TRUE) 
+```
+
+Mortality - mobility (primary)
+
+```{r echo = F, include = F}
+med_fn = function(BAmeasure){
+  
+  step1 =
+     cmest(
+       data = base_offspring_df,
+       model = "rb",
+       full = TRUE,
+       inference = "bootstrap",
+       outcome = "T_mort",
+       event = "mort_status",
+       exposure = "rmob_std",
+       mediator = BAmeasure,
+       EMint = TRUE,
+       basec = c("Age", "sex"),
+       mreg = list("linear"),
+       yreg = "coxph",
+       mval = list(0),
+       astar = 0,
+       a = 1,
+       basecval = NULL,
+       nboot = 50,
+       multimp = FALSE
+     )
+  
+out =
+  rbind(step1$effect.pe, step1$effect.ci.low, step1$effect.ci.high) %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  dplyr::select(rte, rcde, rpnde, rtnie, rtnde, rpnie, pm) %>%
+  t() %>%
+  as.data.frame()
+
+ colnames(out) = c("estimate", "lowerCI", "upperCI")
+
+ test =
+   out %>%
+   rownames_to_column() %>%
+   mutate(estimate = format(round(estimate, digits = 2), nsmall = 2),
+          lowerCI = format(round(lowerCI, digits = 2), nsmall = 2),
+          upperCI = format(round(upperCI, digits = 2), nsmall = 2)
+      ) %>%
+   mutate(CI = paste("(",lowerCI,",",upperCI,")", sep = "")) %>%
+   rename(effect = rowname) %>%
+   dplyr::select(effect, estimate, CI) %>%
+   pivot_wider(names_from = effect, values_from = c(estimate, CI))
+
+  n = nobs(step1$reg.output$yreg)
+  
+  cbind(test, n)
+  
+}
+
+
+BAmeasure_list = c(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+output = 
+  map_df(BAmeasure_list, med_fn, .id = "bioage_measure") %>%
+  dplyr::mutate(bioage_measure =
+          ifelse(bioage_measure == "Dunedin_PoAm45", "DunedinPACE",
+          ifelse(bioage_measure == "DNAmAge_resid", "Horvath Clock",
+          ifelse(bioage_measure == "DNAmAgeHannum_resid", "Hannum Clock",
+          ifelse(bioage_measure == "DNAmPhenoAge_resid", "PhenoAge Clock",
+          ifelse(bioage_measure == "DNAmGrimAge_resid", "GrimAge Clock", bioage_measure)))))) %>%
+  dplyr::select(-n) %>%
+  pivot_longer(c(estimate_rte:CI_pm)) %>%
+  separate(name, into = c("estimate", "effect")) %>%
+  pivot_wider(names_from = "estimate", values_from = "value")
+
+```
+
+```{r echo = FALSE}
+output %>%
+  mutate(estimate = as.numeric(estimate)) %>%
+  knitr::kable(col.names = c("Biological Aging Measure", "Effect", "Estimate", "CI")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0,bold=TRUE) 
+```
+
+Cell-count-adjusted mediation analysis
+
+Mortality - attainment (cell-count-adjusted)
+
+```{r echo = F, include = F}
+med_fn = function(BAmeasure){
+  
+  step1 =
+     cmest(
+       data = base_offspring_df,
+       model = "rb",
+       full = TRUE,
+       inference = "bootstrap",
+       outcome = "T_mort",
+       event = "mort_status",
+       exposure = "education_std",
+       mediator = BAmeasure,
+       EMint = TRUE,
+       basec = c("Age", "sex", "CD4T", "CD8T", "Mono", "Gran", "NK", "Bcell"),
+       mreg = list("linear"),
+       yreg = "coxph",
+       mval = list(0),
+       astar = 0,
+       a = 1,
+       basecval = NULL,
+       nboot = 50,
+       multimp = FALSE
+     )
+
+out =
+  rbind(step1$effect.pe, step1$effect.ci.low, step1$effect.ci.high) %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  dplyr::select(rte, rcde, rpnde, rtnie, rtnde, rpnie, pm) %>%
+  t() %>%
+  as.data.frame()
+
+ colnames(out) = c("estimate", "lowerCI", "upperCI")
+
+ test =
+   out %>%
+   rownames_to_column() %>%
+   mutate(estimate = format(round(estimate, digits = 2), nsmall = 2),
+          lowerCI = format(round(lowerCI, digits = 2), nsmall = 2),
+          upperCI = format(round(upperCI, digits = 2), nsmall = 2)
+      ) %>%
+   mutate(CI = paste("(",lowerCI,",",upperCI,")", sep = "")) %>%
+   rename(effect = rowname) %>%
+   dplyr::select(effect, estimate, CI) %>%
+   pivot_wider(names_from = effect, values_from = c(estimate, CI))
+
+  n = nobs(step1$reg.output$yreg)
+  
+  cbind(test, n)
+  
+}
+
+
+BAmeasure_list = c(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+attain_output = 
+  map_df(BAmeasure_list, med_fn, .id = "bioage_measure") 
+
+attain_output =
+  attain_output %>%
+  dplyr::mutate(bioage_measure =
+          ifelse(bioage_measure == "Dunedin_PoAm45", "DunedinPACE",
+          ifelse(bioage_measure == "DNAmAge_resid", "Horvath Clock",
+          ifelse(bioage_measure == "DNAmAgeHannum_resid", "Hannum Clock",
+          ifelse(bioage_measure == "DNAmPhenoAge_resid", "PhenoAge Clock",
+          ifelse(bioage_measure == "DNAmGrimAge_resid", "GrimAge Clock", bioage_measure)))))) %>%
+  dplyr::select(-n) %>%
+  pivot_longer(c(estimate_rte:CI_pm)) %>%
+  separate(name, into = c("estimate", "effect")) %>%
+  pivot_wider(names_from = "estimate", values_from = "value")
+
+options(knitr.kable.NA = '')
+```
+
+```{r echo = FALSE}
+attain_output %>%
+  mutate(estimate = as.numeric(estimate)) %>%
+  knitr::kable(col.names = c("Biological Aging Measure", "Effect", "Estimate", "CI")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0,bold=TRUE) 
+```
+
+Mortality - mobility (cell-count-adjusted)
+
+```{r echo = F, include = F}
+med_fn = function(BAmeasure){
+  
+  step1 =
+     cmest(
+       data = base_offspring_df,
+       model = "rb",
+       full = TRUE,
+       inference = "bootstrap",
+       outcome = "T_mort",
+       event = "mort_status",
+       exposure = "rmob_std",
+       mediator = BAmeasure,
+       EMint = TRUE,
+       basec = c("Age", "sex", "CD4T", "CD8T", "Mono", "Gran", "NK", "Bcell"),
+       mreg = list("linear"),
+       yreg = "coxph",
+       mval = list(0),
+       astar = 0,
+       a = 1,
+       basecval = NULL,
+       nboot = 50,
+       multimp = FALSE
+     )
+
+out =
+  rbind(step1$effect.pe, step1$effect.ci.low, step1$effect.ci.high) %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  dplyr::select(rte, rcde, rpnde, rtnie, rtnde, rpnie, pm) %>%
+  t() %>%
+  as.data.frame()
+
+ colnames(out) = c("estimate", "lowerCI", "upperCI")
+
+ test =
+   out %>%
+   rownames_to_column() %>%
+   mutate(estimate = format(round(estimate, digits = 2), nsmall = 2),
+          lowerCI = format(round(lowerCI, digits = 2), nsmall = 2),
+          upperCI = format(round(upperCI, digits = 2), nsmall = 2)
+      ) %>%
+   mutate(CI = paste("(",lowerCI,",",upperCI,")", sep = "")) %>%
+   rename(effect = rowname) %>%
+   dplyr::select(effect, estimate, CI) %>%
+   pivot_wider(names_from = effect, values_from = c(estimate, CI))
+
+  n = nobs(step1$reg.output$yreg)
+  
+  cbind(test, n)
+  
+}
+
+
+BAmeasure_list = c(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+output = 
+  map_df(BAmeasure_list, med_fn, .id = "bioage_measure") 
+
+output =
+  output %>%
+  dplyr::mutate(bioage_measure =
+          ifelse(bioage_measure == "Dunedin_PoAm45", "DunedinPACE",
+          ifelse(bioage_measure == "DNAmAge_resid", "Horvath Clock",
+          ifelse(bioage_measure == "DNAmAgeHannum_resid", "Hannum Clock",
+          ifelse(bioage_measure == "DNAmPhenoAge_resid", "PhenoAge Clock",
+          ifelse(bioage_measure == "DNAmGrimAge_resid", "GrimAge Clock", bioage_measure)))))) %>%
+  dplyr::select(-n) %>%
+  pivot_longer(c(estimate_rte:CI_pm)) %>%
+  separate(name, into = c("estimate", "effect")) %>%
+  pivot_wider(names_from = "estimate", values_from = "value")
+
+options(knitr.kable.NA = '')
+```
+
+```{r echo = FALSE}
+output %>%
+  mutate(estimate = as.numeric(estimate)) %>%
+  knitr::kable(col.names = c("Biological Aging Measure", "Effect", "Estimate", "CI")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0,bold=TRUE) 
+```
+
+Smoking-adjusted mediation analysis
+
+Mortality - attainment (smoking-adjusted)
+
+```{r echo = F, include = F}
+med_fn = function(BAmeasure){
+  
+  step1 =
+     cmest(
+       data = base_offspring_df,
+       model = "rb",
+       full = TRUE,
+       inference = "bootstrap",
+       outcome = "T_mort",
+       event = "mort_status",
+       exposure = "education_std",
+       mediator = BAmeasure,
+       EMint = TRUE,
+       basec = c("Age", "sex", "smknow", "cpd"),
+       mreg = list("linear"),
+       yreg = "coxph",
+       mval = list(0),
+       astar = 0,
+       a = 1,
+       basecval = NULL,
+       nboot = 50,
+       multimp = FALSE
+     )
+
+out =
+  rbind(step1$effect.pe, step1$effect.ci.low, step1$effect.ci.high) %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  dplyr::select(rte, rcde, rpnde, rtnie, rtnde, rpnie, pm) %>%
+  t() %>%
+  as.data.frame()
+
+ colnames(out) = c("estimate", "lowerCI", "upperCI")
+
+ test =
+   out %>%
+   rownames_to_column() %>%
+   mutate(estimate = format(round(estimate, digits = 2), nsmall = 2),
+          lowerCI = format(round(lowerCI, digits = 2), nsmall = 2),
+          upperCI = format(round(upperCI, digits = 2), nsmall = 2)
+      ) %>%
+   mutate(CI = paste("(",lowerCI,",",upperCI,")", sep = "")) %>%
+   rename(effect = rowname) %>%
+   dplyr::select(effect, estimate, CI) %>%
+   pivot_wider(names_from = effect, values_from = c(estimate, CI))
+
+  n = nobs(step1$reg.output$yreg)
+  
+  cbind(test, n)
+  
+}
+
+
+BAmeasure_list = c(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+attain_output = 
+  map_df(BAmeasure_list, med_fn, .id = "bioage_measure") 
+
+attain_output =
+  attain_output %>%
+  dplyr::mutate(bioage_measure =
+          ifelse(bioage_measure == "Dunedin_PoAm45", "DunedinPACE",
+          ifelse(bioage_measure == "DNAmAge_resid", "Horvath Clock",
+          ifelse(bioage_measure == "DNAmAgeHannum_resid", "Hannum Clock",
+          ifelse(bioage_measure == "DNAmPhenoAge_resid", "PhenoAge Clock",
+          ifelse(bioage_measure == "DNAmGrimAge_resid", "GrimAge Clock", bioage_measure)))))) %>%
+  dplyr::select(-n) %>%
+  pivot_longer(c(estimate_rte:CI_pm)) %>%
+  separate(name, into = c("estimate", "effect")) %>%
+  pivot_wider(names_from = "estimate", values_from = "value")
+
+options(knitr.kable.NA = '')
+```
+
+```{r echo = FALSE}
+attain_output %>%
+  mutate(estimate = as.numeric(estimate)) %>%
+  knitr::kable(col.names = c("Biological Aging Measure", "Effect", "Estimate", "CI")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0,bold=TRUE) 
+```
+
+Mortality - mobility (smoking-adjusted)
+
+```{r echo = F, include = F}
+med_fn = function(BAmeasure){
+  
+  step1 =
+     cmest(
+       data = base_offspring_df,
+       model = "rb",
+       full = TRUE,
+       inference = "bootstrap",
+       outcome = "T_mort",
+       event = "mort_status",
+       exposure = "rmob_std",
+       mediator = BAmeasure,
+       EMint = TRUE,
+       basec = c("Age", "sex", "smknow", "cpd"),
+       mreg = list("linear"),
+       yreg = "coxph",
+       mval = list(0),
+       astar = 0,
+       a = 1,
+       basecval = NULL,
+       nboot = 50,
+       multimp = FALSE
+     )
+
+out =
+  rbind(step1$effect.pe, step1$effect.ci.low, step1$effect.ci.high) %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  dplyr::select(rte, rcde, rpnde, rtnie, rtnde, rpnie, pm) %>%
+  t() %>%
+  as.data.frame()
+
+ colnames(out) = c("estimate", "lowerCI", "upperCI")
+
+ test =
+   out %>%
+   rownames_to_column() %>%
+   mutate(estimate = format(round(estimate, digits = 2), nsmall = 2),
+          lowerCI = format(round(lowerCI, digits = 2), nsmall = 2),
+          upperCI = format(round(upperCI, digits = 2), nsmall = 2)
+      ) %>%
+   mutate(CI = paste("(",lowerCI,",",upperCI,")", sep = "")) %>%
+   rename(effect = rowname) %>%
+   dplyr::select(effect, estimate, CI) %>%
+   pivot_wider(names_from = effect, values_from = c(estimate, CI))
+
+  n = nobs(step1$reg.output$yreg)
+  
+  cbind(test, n)
+  
+}
+
+
+BAmeasure_list = c(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+output = 
+  map_df(BAmeasure_list, med_fn, .id = "bioage_measure") 
+
+output =
+  output %>%
+  dplyr::mutate(bioage_measure =
+          ifelse(bioage_measure == "Dunedin_PoAm45", "DunedinPACE",
+          ifelse(bioage_measure == "DNAmAge_resid", "Horvath Clock",
+          ifelse(bioage_measure == "DNAmAgeHannum_resid", "Hannum Clock",
+          ifelse(bioage_measure == "DNAmPhenoAge_resid", "PhenoAge Clock",
+          ifelse(bioage_measure == "DNAmGrimAge_resid", "GrimAge Clock", bioage_measure)))))) %>%
+  dplyr::select(-n) %>%
+  pivot_longer(c(estimate_rte:CI_pm)) %>%
+  separate(name, into = c("estimate", "effect")) %>%
+  pivot_wider(names_from = "estimate", values_from = "value")
+
+options(knitr.kable.NA = '')
+```
+
+```{r echo = FALSE}
+output %>%
+  mutate(estimate = as.numeric(estimate)) %>%
+  knitr::kable(col.names = c("Biological Aging Measure", "Effect", "Estimate", "CI")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0,bold=TRUE) 
+```
+
+
+#### Supplementary Material: Cell-count-adjusted analyses
+
+Cell-count-adjusted regression of DunedinPACE measures on educational attainment and educational mobility
+
+```{r echo = FALSE}
+# Writing function
+edpoa_celladj_reg <- function(bioage_measure, ed_var, sample) {
+  
+  object = lm.cluster(scale(pull(sample, bioage_measure)) ~ pull(sample, ed_var) + Age + sex + CD4T + CD8T + Mono + Gran + NK + Bcell, data = sample, cluster = "sibgroupid")
+    
+  reg_output =
+    summary(object$lm_res) %>% 
+    broom::tidy() %>%
+    mutate(conf.low = estimate - (1.96*std.error),
+           conf.high = estimate + (1.96*std.error)) %>%
+    filter(term == "pull(sample, ed_var)") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    obj2 = nobs(object$lm_res) %>% as.data.frame()
+    colnames(obj2) <- c("N")
+
+    cbind(reg_output, obj2)
+    
+}
+  
+# Create input list
+BA_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+edvar_list = list(education_std = "education_std", maxpared_std = "maxpared_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+sample_list = list(offspringmobility_df = offspringmobility_df, Gen3mobility_df = Gen3mobility_df)
+samplename_list = list("Offspring" = "Offspring", "Gen3" = "Gen3")
+
+edpoa_reg_list = 
+  list(BA_list = BA_list, edvar_list = edvar_list, sample_list = sample_list)
+edpoa_reg_listcombo = 
+  cross_df(edpoa_reg_list)
+
+edpoa_reg_namelist = 
+  list(BA_list = BA_list, edvar_list = edvar_list, samplename_list = samplename_list)
+edpoa_reg_namelistcombo = 
+  cross_df(edpoa_reg_namelist)
+
+# Apply function
+edpoa_celladj_reg_output =
+  pmap_dfr(list(edpoa_reg_listcombo$BA_list, edpoa_reg_listcombo$edvar_list, edpoa_reg_listcombo$sample_list), edpoa_celladj_reg) %>%
+  cbind(edpoa_reg_namelistcombo) %>%
+  dplyr::select(samplename_list, BA_list, edvar_list, everything()) %>%
+  dplyr::mutate(BA_list = ifelse(BA_list == "Dunedin_PoAm45", "DunedinPACE", 
+                          ifelse(BA_list == "DNAmAge_resid", "Horvath Clock",        
+                          ifelse(BA_list == "DNAmAgeHannum_resid", "Hannum Clock", 
+                          ifelse(BA_list == "DNAmPhenoAge_resid", "PhenoAge Clock", 
+                          ifelse(BA_list == "DNAmGrimAge_resid", "GrimAge Clock", NA)))))) %>%
+  mutate(BA_list = factor(BA_list, levels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock"))) %>%
+  rename("Cohort" = samplename_list,
+         "Outcome" = BA_list,
+         "Predictor" = edvar_list,
+         "ES" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("education_std", "maxpared_std", "dmob_std", "rmob_std"), labels = c("Educational Attainment", "Parental Education", "Mobility (Delta)", "Mobility (RC)"))) %>%
+  arrange(desc(Cohort), Outcome, Predictor) %>%
+  pivot_wider(names_from = Cohort, values_from = c(ES, CI, p, N)) %>%
+  dplyr::select(Outcome, Predictor, ends_with("Offspring"), ends_with("Gen3"))
+
+edpoa_celladj_reg_output %>%
+  select(-Outcome, -N_Offspring, -N_Gen3) %>%
+  knitr::kable(col.names = c("Predictor", "ES", "CI", "p", "ES", "CI", "p"), align = "lcccccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  add_header_above(c(" " = 1, "Offspring (n=1652)" = 3, "Gen3 (n=1449)" = 3), bold = T) %>%
+  pack_rows("DunedinPACE", 1, 4) %>%
+  pack_rows("Horvath Clock", 5, 8) %>%
+  pack_rows("Hannum Clock", 9, 12) %>%
+  pack_rows("PhenoAge Clock", 13, 16) %>%
+  pack_rows("GrimAge Clock", 17, 20)
+```
+
+Supplemental Table S6. Cell-count-adjusted survival analysis by educational attainment, educational mobility, and DunedinPACE
+
+```{r echo = FALSE}
+# Writing function
+surv_reg_raw <- function(sample, pred_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(sample, pred_var)) + Age + sex + CD4T + CD8T + Mono + Gran + NK + Bcell, data = sample)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(sample, pred_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+sample_list = list(edmort_df = edmort_df, mobmort_df = mobmort_df)
+samplename_list = list("Offspring Education Sample" = "Education Sample", "Mediation Sample" = "Mediation Sample")
+pred_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid", education_std = "education_std", maxpared_std = "maxpared_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+
+demsurv_reg_list = 
+  list(sample_list = sample_list, pred_list = pred_list)
+demsurv_reg_listcombo = 
+  cross_df(demsurv_reg_list)
+
+demsurv_reg_namelist = 
+  list(samplename_list = samplename_list, pred_list = pred_list)
+demsurv_reg_namelistcombo = 
+  cross_df(demsurv_reg_namelist)
+
+pmap_dfr(list(demsurv_reg_listcombo$sample_list, demsurv_reg_listcombo$pred_list), surv_reg_raw) %>%
+  cbind(demsurv_reg_namelistcombo) %>%
+  select(samplename_list, pred_list, N, Events, estimate, CI, p.value) %>%
+  rename("Predictor" = pred_list,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid", "education_std", "maxpared_std", "dmob_std", "rmob_std"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock", "Educational Attainment", "Parental Education", "Mobility (Delta)", "Mobility (RC)"))) %>%
+  arrange(Predictor, samplename_list) %>%
+  filter((samplename_list == "Mediation Sample")|
+          (samplename_list == "Education Sample" & Predictor %in% c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock")) |
+           (samplename_list == "Education Sample" & Predictor == "Educational Attainment")
+           ) %>%
+  arrange(samplename_list, Predictor) %>%
+  select(-N, -Events) %>%
+  pivot_wider(names_from = samplename_list, values_from = c(HR, CI, p)) %>%
+  replace(is.na(.), "--") %>%
+  select(Predictor, `HR_Education Sample`, `CI_Education Sample`, `p_Education Sample`,
+         `HR_Mediation Sample`, `CI_Mediation Sample`, `p_Mediation Sample`) %>%
+  knitr::kable(align = "lcccccc", col.names = c("Predictor", "HR", "CI", "p", "HR", "CI", "p")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  pack_rows("Biological aging measures", 1, 5) %>%
+  pack_rows("Education measures", 6, 9) %>%
+  add_header_above(c(" " = 1, "Offspring Education Sample (n=2411, 607 deaths)" = 3, "Mediation Sample (n=1648, 402 deaths)" = 3), bold = T)
+```
+
+#### Supplementary Material: Smoking-adjusted analyses
+
+Smoking-adjusted regression of DunedinPACE measures on educational attainment and educational mobility
+
+```{r echo = FALSE}
+# Writing function
+edpoa_smokeadj_reg <- function(bioage_measure, ed_var, sample) {
+  
+  object = lm.cluster(scale(pull(sample, bioage_measure)) ~ pull(sample, ed_var) + Age + sex + smknow + cpd, data = sample, cluster = "sibgroupid")
+    
+  reg_output =
+    summary(object$lm_res) %>% 
+    broom::tidy() %>%
+    mutate(conf.low = estimate - (1.96*std.error),
+           conf.high = estimate + (1.96*std.error)) %>%
+    filter(term == "pull(sample, ed_var)") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    obj2 = nobs(object$lm_res) %>% as.data.frame()
+    colnames(obj2) <- c("n")
+
+    cbind(reg_output, obj2)
+    
+}
+  
+# Create input list
+BA_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+edvar_list = list(education_std = "education_std", maxpared_std = "maxpared_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+sample_list = list(offspringmobility_df = offspringmobility_df)
+samplename_list = list("Offspring" = "Offspring")
+
+edpoa_reg_list = 
+  list(BA_list = BA_list, edvar_list = edvar_list, sample_list = sample_list)
+edpoa_reg_listcombo = 
+  cross_df(edpoa_reg_list)
+
+edpoa_reg_namelist = 
+  list(BA_list = BA_list, edvar_list = edvar_list, samplename_list = samplename_list)
+edpoa_reg_namelistcombo = 
+  cross_df(edpoa_reg_namelist)
+
+# Apply function
+edpoa_smokeadj_reg_output =
+  pmap_dfr(list(edpoa_reg_listcombo$BA_list, edpoa_reg_listcombo$edvar_list, edpoa_reg_listcombo$sample_list), edpoa_smokeadj_reg) %>%
+  cbind(edpoa_reg_namelistcombo) %>%
+  dplyr::select(samplename_list, BA_list, edvar_list, everything()) %>%
+  dplyr::mutate(BA_list = ifelse(BA_list == "Dunedin_PoAm45", "DunedinPACE", 
+                          ifelse(BA_list == "DNAmAge_resid", "Horvath Clock",        
+                          ifelse(BA_list == "DNAmAgeHannum_resid", "Hannum Clock", 
+                          ifelse(BA_list == "DNAmPhenoAge_resid", "PhenoAge Clock", 
+                          ifelse(BA_list == "DNAmGrimAge_resid", "GrimAge Clock", NA)))))) %>%
+  mutate(BA_list = factor(BA_list, levels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock"))) %>%
+  rename("Cohort" = samplename_list,
+         "Outcome" = BA_list,
+         "Predictor" = edvar_list,
+         "ES" = estimate,
+         "p" = p.value,
+         "N" = n) %>%
+  mutate(Predictor = factor(Predictor, levels = c("education_std", "maxpared_std", "dmob_std", "rmob_std"), labels = c("Educational Attainment", "Parental Education", "Mobility (Delta)", "Mobility (RC)"))) %>%
+  select(-Cohort) %>%
+  arrange(Outcome, Predictor)
+  
+edpoa_smokeadj_reg_output %>%
+  select(-Outcome, -N) %>%
+  knitr::kable(col.names = c("Predictor", "ES", "CI", "p"), align = "lccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  add_header_above(c(" " = 1, "Offspring (n=1646)" = 3), bold = T) %>%
+  pack_rows("DunedinPACE", 1, 4) %>%
+  pack_rows("Horvath Clock", 5, 8) %>%
+  pack_rows("Hannum Clock", 9, 12) %>%
+  pack_rows("PhenoAge Clock", 13, 16) %>%
+  pack_rows("GrimAge Clock", 17, 20)
+```
+
+Smoking-adjusted survival analysis by educational attainment, educational mobility, and DunedinPACE
+
+Mortality
+
+```{r echo = FALSE}
+# Writing function
+surv_reg_raw <- function(sample, pred_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(sample, pred_var)) + Age + sex + smknow + cpd, data = sample)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(sample, pred_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+sample_list = list(edmort_df = edmort_df, mobmort_df = mobmort_df)
+samplename_list = list("Offspring Education Sample" = "Education Sample", "Mediation Sample" = "Mediation Sample")
+pred_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid", education_std = "education_std", maxpared_std = "maxpared_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+
+demsurv_reg_list = 
+  list(sample_list = sample_list, pred_list = pred_list)
+demsurv_reg_listcombo = 
+  cross_df(demsurv_reg_list)
+
+demsurv_reg_namelist = 
+  list(samplename_list = samplename_list, pred_list = pred_list)
+demsurv_reg_namelistcombo = 
+  cross_df(demsurv_reg_namelist)
+
+pmap_dfr(list(demsurv_reg_listcombo$sample_list, demsurv_reg_listcombo$pred_list), surv_reg_raw) %>%
+  cbind(demsurv_reg_namelistcombo) %>%
+  select(samplename_list, pred_list, N, Events, estimate, CI, p.value) %>%
+  rename("Predictor" = pred_list,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid", "education_std", "maxpared_std", "dmob_std", "rmob_std"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock", "Educational Attainment", "Parental Education", "Mobility (Delta)", "Mobility (RC)"))) %>%
+  arrange(Predictor, samplename_list) %>%
+  filter((samplename_list == "Mediation Sample")|
+          (samplename_list == "Education Sample" & Predictor %in% c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock")) |
+           (samplename_list == "Education Sample" & Predictor == "Educational Attainment")
+           ) %>%
+  arrange(samplename_list, Predictor) %>%
+  select(-N, -Events) %>%
+  pivot_wider(names_from = samplename_list, values_from = c(HR, CI, p)) %>%
+  replace(is.na(.), "--") %>%
+  select(Predictor, `HR_Education Sample`, `CI_Education Sample`, `p_Education Sample`,
+         `HR_Mediation Sample`, `CI_Mediation Sample`, `p_Mediation Sample`) %>%
+  knitr::kable(align = "lcccccc", col.names = c("Predictor", "HR", "CI", "p", "HR", "CI", "p")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  pack_rows("Biological aging measures", 1, 5) %>%
+  pack_rows("Education measures", 6, 9) %>%
+  add_header_above(c(" " = 1, "Offspring Education Sample (n=2408, 606 deaths)" = 3, "Mediation Sample (n=1646, 401 deaths)" = 3), bold = T)
+```
+
+
+#### Supplementary analysis - analysis of educational mobility based on raw years
+
+```{r echo = FALSE}
+# Variables
+var_list = c("Own education", "Highest parental education", "Ed. Mobility (Delta)", "Ed. Mobility (RC)")
+```
+
+Offspring outputs
+
+```{r echo = FALSE}
+# Correlations
+cor_list_offspring = c(
+    round(cor(mobilityoffspring_df$education_cont, mobilityoffspring_df$education_std, method = "pearson"), 2),
+    round(cor(mobilityoffspring_df$maxpared_cont, mobilityoffspring_df$maxpared_std, method = "pearson"), 2),
+    round(cor(mobilityoffspring_df$dmob_cont, mobilityoffspring_df$dmob_std, method = "pearson"), 2),
+    round(cor(mobilityoffspring_df$rmob_cont, mobilityoffspring_df$rmob_std, method = "pearson"), 2))
+```
+
+```{r echo = FALSE, message = FALSE}
+# Associations with PACE
+edcont_reg_offspring = 
+  lm.cluster(scale(Dunedin_PoAm45) ~ scale(education_cont) + Age + sex, data = mobilityoffspring_df, cluster = "sibgroupid") %>%
+  summary() %>%
+  as.data.frame() %>%
+  mutate(lowerCI = Estimate - (1.96*`Std. Error`),
+         upperCI = Estimate + (1.96*`Std. Error`)) %>%
+  mutate(Estimate = format(round(Estimate, 2), nsmall = 2),
+         lowerCI = format(round(lowerCI, 2), nsmall = 2),
+         upperCI = format(round(upperCI, 2), nsmall = 2)) %>%
+  mutate(value = paste(Estimate, " (", lowerCI, ",", upperCI, ")", sep = ""))
+edcont_col2_offspring = edcont_reg_offspring[2,7] 
+  
+paredcont_reg_offspring = 
+  lm.cluster(scale(Dunedin_PoAm45) ~ scale(maxpared_cont) + Age + sex, data = mobilityoffspring_df, cluster = "sibgroupid") %>%
+  summary() %>%
+  as.data.frame() %>%
+  mutate(lowerCI = Estimate - (1.96*`Std. Error`),
+         upperCI = Estimate + (1.96*`Std. Error`)) %>%
+  mutate(Estimate = format(round(Estimate, 2), nsmall = 2),
+         lowerCI = format(round(lowerCI, 2), nsmall = 2),
+         upperCI = format(round(upperCI, 2), nsmall = 2)) %>%
+  mutate(value = paste(Estimate, " (", lowerCI, ",", upperCI, ")", sep = ""))
+paredcont_col2_offspring = paredcont_reg_offspring[2,7] 
+
+edmobcontdelta_reg_offspring = 
+  lm.cluster(scale(Dunedin_PoAm45) ~ scale(dmob_cont) + Age + sex, data = mobilityoffspring_df, cluster = "sibgroupid") %>%
+  summary() %>%
+  as.data.frame() %>%
+  mutate(lowerCI = Estimate - (1.96*`Std. Error`),
+         upperCI = Estimate + (1.96*`Std. Error`)) %>%
+  mutate(Estimate = format(round(Estimate, 2), nsmall = 2),
+         lowerCI = format(round(lowerCI, 2), nsmall = 2),
+         upperCI = format(round(upperCI, 2), nsmall = 2)) %>%
+  mutate(value = paste(Estimate, " (", lowerCI, ",", upperCI, ")", sep = ""))
+edmobcontdelta_reg_col2_offspring = edmobcontdelta_reg_offspring[2,7] 
+
+edmobcontrc_reg_offspring = 
+  lm.cluster(scale(Dunedin_PoAm45) ~ scale(rmob_cont) + Age + sex, data = mobilityoffspring_df, cluster = "sibgroupid") %>%
+  summary() %>%
+  as.data.frame() %>%
+  mutate(lowerCI = Estimate - (1.96*`Std. Error`),
+         upperCI = Estimate + (1.96*`Std. Error`)) %>%
+  mutate(Estimate = format(round(Estimate, 2), nsmall = 2),
+         lowerCI = format(round(lowerCI, 2), nsmall = 2),
+         upperCI = format(round(upperCI, 2), nsmall = 2)) %>%
+  mutate(value = paste(Estimate, " (", lowerCI, ",", upperCI, ")", sep = ""))
+edmobcontrc_reg_col2_offspring = edmobcontrc_reg_offspring[2,7] 
+
+ES_PACE_offspring = c(edcont_col2_offspring, paredcont_col2_offspring, edmobcontdelta_reg_col2_offspring, edmobcontrc_reg_col2_offspring)
+```
+
+```{r echo = FALSE}
+# Associations with mortality
+edcont_surv_offspring = 
+  coxph(Surv(T_mort, mort_status) ~ scale(education_cont) + Age + sex, data = mobilityoffspring_df) %>% 
+  broom::tidy() %>%
+  mutate(lowerCI = estimate - (1.96*std.error),
+         upperCI = estimate + (1.96*std.error)) %>%
+  mutate(est_exp = format(round(exp(estimate), 2), nsmall = 2),
+         lowerCI_exp = format(round(exp(lowerCI), 2), nsmall = 2),
+         upperCI_exp = format(round(exp(upperCI), 2), nsmall = 2)) %>%
+  mutate(value = paste(est_exp, " (", lowerCI_exp, ",", upperCI_exp, ")", sep = ""))
+edcont_col3_offspring = edcont_surv_offspring[[1,11]]
+
+paredcont_surv_offspring = coxph(Surv(T_mort, mort_status) ~ scale(maxpared_cont) + Age + sex, data = mobilityoffspring_df) %>% 
+  broom::tidy() %>%
+  mutate(lowerCI = estimate - (1.96*std.error),
+         upperCI = estimate + (1.96*std.error)) %>%
+  mutate(est_exp = format(round(exp(estimate), 2), nsmall = 2),
+         lowerCI_exp = format(round(exp(lowerCI), 2), nsmall = 2),
+         upperCI_exp = format(round(exp(upperCI), 2), nsmall = 2)) %>%
+  mutate(value = paste(est_exp, " (", lowerCI_exp, ",", upperCI_exp, ")", sep = ""))
+paredcont_col3_offspring = paredcont_surv_offspring[[1,11]] 
+
+edmobcontdelta_surv_offspring = coxph(Surv(T_mort, mort_status) ~ scale(dmob_cont) + Age + sex, data = mobilityoffspring_df) %>% 
+  broom::tidy() %>%
+  mutate(lowerCI = estimate - (1.96*std.error),
+         upperCI = estimate + (1.96*std.error)) %>%
+  mutate(est_exp = format(round(exp(estimate), 2), nsmall = 2),
+         lowerCI_exp = format(round(exp(lowerCI), 2), nsmall = 2),
+         upperCI_exp = format(round(exp(upperCI), 2), nsmall = 2)) %>%
+  mutate(value = paste(est_exp, " (", lowerCI_exp, ",", upperCI_exp, ")", sep = ""))
+edmobcontdelta_surv_col3_offspring = edmobcontdelta_surv_offspring[[1,11]] 
+
+edmobcontrc_surv_offspring = coxph(Surv(T_mort, mort_status) ~ scale(rmob_cont) + Age + sex, data = mobilityoffspring_df) %>% 
+  broom::tidy() %>%
+  mutate(lowerCI = estimate - (1.96*std.error),
+         upperCI = estimate + (1.96*std.error)) %>%
+  mutate(est_exp = format(round(exp(estimate), 2), nsmall = 2),
+         lowerCI_exp = format(round(exp(lowerCI), 2), nsmall = 2),
+         upperCI_exp = format(round(exp(upperCI), 2), nsmall = 2)) %>%
+  mutate(value = paste(est_exp, " (", lowerCI_exp, ",", upperCI_exp, ")", sep = ""))
+edmobcontrc_surv_col3_offspring = edmobcontrc_surv_offspring[[1,11]] 
+
+ES_surv_offspring = c(edcont_col3_offspring, paredcont_col3_offspring, edmobcontdelta_surv_col3_offspring, edmobcontrc_surv_col3_offspring)
+```
+
+```{r echo = FALSE, include = FALSE}
+# % Mediation
+library(sjmisc)
+
+base_offspring_alt_df = 
+  base_offspring_df %>%
+  mutate(edcont_z = std(education_cont),
+         paredcont_z = std(maxpared_cont),
+         dmobcont_z = std(dmob_cont),
+         rmobcont_z = std(rmob_cont))
+
+med_fn_alt = function(ed_var){
+  
+  step1 =
+     cmest(
+       data = base_offspring_alt_df,
+       model = "rb",
+       full = TRUE,
+       inference = "bootstrap",
+       outcome = "T_mort",
+       event = "mort_status",
+       exposure = ed_var,
+       mediator = "Dunedin_PoAm45",
+       EMint = TRUE,
+       basec = c("Age", "sex"),
+       mreg = list("linear"),
+       yreg = "coxph",
+       mval = list(0),
+       astar = 0,
+       a = 1,
+       basecval = NULL,
+       nboot = 50,
+       multimp = FALSE
+     )
+
+out =
+  rbind(step1$effect.pe, step1$effect.ci.low, step1$effect.ci.high) %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  dplyr::select(rte, rcde, rpnde, rtnie, rtnde, rpnie, pm) %>%
+  t() %>%
+  as.data.frame()
+
+ colnames(out) = c("estimate", "lowerCI", "upperCI")
+
+ test =
+   out %>%
+   rownames_to_column() %>%
+   mutate(estimate = format(round(estimate, digits = 2), nsmall = 2),
+          lowerCI = format(round(lowerCI, digits = 2), nsmall = 2),
+          upperCI = format(round(upperCI, digits = 2), nsmall = 2)
+      ) %>%
+   mutate(CI = paste("(",lowerCI,",",upperCI,")", sep = "")) %>%
+   rename(effect = rowname) %>%
+   dplyr::select(effect, estimate, CI) %>%
+   pivot_wider(names_from = effect, values_from = c(estimate, CI))
+
+  n = nobs(step1$reg.output$yreg)
+  
+  cbind(test, n)
+  
+}
+
+edvar_list = c(edcont_z = "edcont_z", paredcont_z = "paredcont_z", dmobcont_z = "dmobcont_z", rmobcont_z = "rmobcont_z")
+
+rawyr_med_output = 
+  map_df(edvar_list, med_fn_alt, .id = "edvar") 
+```
+
+```{r echo = FALSE}
+rawyr_med_output =
+  rawyr_med_output %>%
+  dplyr::select(edvar, estimate_pm, CI_pm) %>%
+  mutate(value = paste(estimate_pm, CI_pm, sep = " "))
+
+medfrac_out = c(rawyr_med_output[1,4], rawyr_med_output[2,4], rawyr_med_output[3,4], rawyr_med_output[4,4])
+```
+
+Gen3 output
+
+```{r echo = FALSE}
+# Correlations
+cor_list_Gen3 = c(
+    round(cor(mobilityGen3_df$education_cont, mobilityGen3_df$education_std, method = "pearson"), 2),
+    round(cor(mobilityGen3_df$maxpared_cont, mobilityGen3_df$maxpared_std, method = "pearson"), 2),
+    round(cor(mobilityGen3_df$dmob_cont, mobilityGen3_df$dmob_std, method = "pearson"), 2),
+    round(cor(mobilityGen3_df$rmob_cont, mobilityGen3_df$rmob_std, method = "pearson"), 2))
+```
+
+```{r echo = FALSE, message = FALSE}
+# Associations with PACE
+edcont_reg_Gen3 = 
+  lm.cluster(scale(Dunedin_PoAm45) ~ scale(education_cont) + Age + sex, data = mobilityGen3_df, cluster = "sibgroupid") %>%
+  summary() %>%
+  as.data.frame() %>%
+  mutate(lowerCI = Estimate - (1.96*`Std. Error`),
+         upperCI = Estimate + (1.96*`Std. Error`)) %>%
+  mutate(Estimate = format(round(Estimate, 2), nsmall = 2),
+         lowerCI = format(round(lowerCI, 2), nsmall = 2),
+         upperCI = format(round(upperCI, 2), nsmall = 2)) %>%
+  mutate(value = paste(Estimate, " (", lowerCI, ",", upperCI, ")", sep = ""))
+edcont_col2_Gen3 = edcont_reg_Gen3[2,7] 
+  
+paredcont_reg_Gen3 = 
+  lm.cluster(scale(Dunedin_PoAm45) ~ scale(maxpared_cont) + Age + sex, data = mobilityGen3_df, cluster = "sibgroupid") %>%
+  summary() %>%
+  as.data.frame() %>%
+  mutate(lowerCI = Estimate - (1.96*`Std. Error`),
+         upperCI = Estimate + (1.96*`Std. Error`)) %>%
+  mutate(Estimate = format(round(Estimate, 2), nsmall = 2),
+         lowerCI = format(round(lowerCI, 2), nsmall = 2),
+         upperCI = format(round(upperCI, 2), nsmall = 2)) %>%
+  mutate(value = paste(Estimate, " (", lowerCI, ",", upperCI, ")", sep = ""))
+paredcont_col2_Gen3 = paredcont_reg_Gen3[2,7] 
+
+edmobcontdelta_reg_Gen3 = 
+  lm.cluster(scale(Dunedin_PoAm45) ~ scale(dmob_cont) + Age + sex, data = mobilityGen3_df, cluster = "sibgroupid") %>%
+  summary() %>%
+  as.data.frame() %>%
+  mutate(lowerCI = Estimate - (1.96*`Std. Error`),
+         upperCI = Estimate + (1.96*`Std. Error`)) %>%
+  mutate(Estimate = format(round(Estimate, 2), nsmall = 2),
+         lowerCI = format(round(lowerCI, 2), nsmall = 2),
+         upperCI = format(round(upperCI, 2), nsmall = 2)) %>%
+  mutate(value = paste(Estimate, " (", lowerCI, ",", upperCI, ")", sep = ""))
+edmobcontdelta_reg_col2_Gen3 = edmobcontdelta_reg_Gen3[2,7] 
+
+edmobcontrc_reg_Gen3 = 
+  lm.cluster(scale(Dunedin_PoAm45) ~ scale(rmob_cont) + Age + sex, data = mobilityGen3_df, cluster = "sibgroupid") %>%
+  summary() %>%
+  as.data.frame() %>%
+  mutate(lowerCI = Estimate - (1.96*`Std. Error`),
+         upperCI = Estimate + (1.96*`Std. Error`)) %>%
+  mutate(Estimate = format(round(Estimate, 2), nsmall = 2),
+         lowerCI = format(round(lowerCI, 2), nsmall = 2),
+         upperCI = format(round(upperCI, 2), nsmall = 2)) %>%
+  mutate(value = paste(Estimate, " (", lowerCI, ",", upperCI, ")", sep = ""))
+edmobcontrc_reg_col2_Gen3 = edmobcontrc_reg_Gen3[2,7] 
+
+ES_PACE_Gen3 = c(edcont_col2_Gen3, paredcont_col2_Gen3, edmobcontdelta_reg_col2_Gen3, edmobcontrc_reg_col2_Gen3)
+```
+
+```{r echo = FALSE}
+data.frame(var_list, cor_list_offspring, ES_PACE_offspring, ES_surv_offspring, medfrac_out,
+           cor_list_Gen3, ES_PACE_Gen3) %>%
+  knitr::kable(col.names = c("Variable (years)", "Correlation with standardized measure", "Association with DunedinPACE", "Association with mortality (HR)", "Mediation fraction", "Correlation with standardized measure", "Association with DunedinPACE"), align = "lcccccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  add_header_above(c(" " = 1, "Offspring Cohort" = 4, "Gen3 Cohort" = 2), bold = TRUE)
+```
+
+### Supplementary Material: Figures
+
+LOESS of years-of-education by birth year
+
+```{r echo = F, message = F, warning = F}
+education_df %>%
+  group_by(cohort) %>%
+  ggplot() +
+  geom_jitter(aes(x = birthcohort_5yr, y = education_cont), size = 0.1) +
+  geom_smooth(aes(x = birthcohort_5yr, y = education_cont), size = 1) +
+  theme_minimal()
+```
+
+Familial education correlation matrices
+
+```{r echo = FALSE}
+# Offspring cohort
+edcor_offspring = mobilityoffspring_df %>% filter(cohort == "Offspring") %>% dplyr::select(education_std, momed_std, daded_std, avg_sib_edu) %>% rename("Own education" = education_std, "Mother's Education" = momed_std, "Father's Education" = daded_std, "Siblings' Education (avg)" = avg_sib_edu)
+
+pairs.panels(edcor_offspring, method = "pearson", lm=T, density = F, ellipses = F, hist.col = "cadetblue2", pch=".", main = "Correlation of own and family education, Offspring sample")
+
+# Gen3 cohort
+edcor_Gen3 = mobilityGen3_df %>% filter(cohort == "GEN3") %>% dplyr::select(education_std, momed_std, daded_std, avg_sib_edu) %>% rename("Own education" = education_std, "Mother's Education" = momed_std, "Father's Education" = daded_std, "Siblings' Education (avg)" = avg_sib_edu)
+
+pairs.panels(edcor_Gen3, method = "pearson", lm=T, density = F, ellipses = F, hist.col = "cadetblue2", pch=".", main = "Correlation of own and family education, Gen3 sample")
+```
+
+Mobility-BA associations in Offspring and Gen3 cohorts, stratified by highest parental education
+
+```{r echo = FALSE}
+mobilityoffspring_df =
+  mobilityoffspring_df %>%
+  mutate(pared_cat = ifelse(maxpared_std < -0.8073338, "<1 SD",
+                        ifelse(maxpared_std > 1.218968, ">1 SD", "Within 1 SD"))) %>%
+  mutate(pared_cat = factor(pared_cat, levels = c("<1 SD", "Within 1 SD", ">1 SD")))
+
+mobilityGen3_df =
+  mobilityGen3_df %>%
+  mutate(pared_cat = ifelse(maxpared_std < -0.8073338, "<1 SD",
+                        ifelse(maxpared_std > 1.218968, ">1 SD", "Within 1 SD"))) %>%
+  mutate(pared_cat = factor(pared_cat, levels = c("<1 SD", "Within 1 SD", ">1 SD")))
+
+mobilityBA_offspring =
+  mobilityoffspring_df %>%
+  dplyr::select(dbGaP_Subject_ID, pared_cat, rmob_std, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(rmob_std, Dunedin_PoAm45, color = pared_cat, fill = pared_cat)) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  facet_wrap(~pared_cat) +
+  theme_minimal() +
+  xlab("Educational mobility (RC)")+
+  ylab("DunedinPACE") +
+  labs(title = "Offspring") +
+  scale_color_manual(values = c("firebrick3", "gray26", "dodgerblue3")) +
+  scale_fill_manual(values = c("firebrick3", "gray26", "dodgerblue3")) +
+  theme(legend.position = "none") +
+  ylim(-1,1) +
+  xlim(-2,2)
+
+mobilityBA_Gen3 =
+  mobilityGen3_df %>%
+  dplyr::select(dbGaP_Subject_ID, pared_cat, rmob_std, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(rmob_std, Dunedin_PoAm45, color = pared_cat, fill = pared_cat)) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  facet_wrap(~pared_cat) +
+  theme_minimal() +
+  xlab("Educational mobility (RC)")+
+  ylab("DunedinPACE") +
+  labs(title = "Gen3") +
+  scale_color_manual(values = c("firebrick3", "gray26", "dodgerblue3")) +
+  scale_fill_manual(values = c("firebrick3", "gray26", "dodgerblue3")) +
+  theme(legend.position = "none") +
+  ylim(-1,1) +
+  xlim(-2,2)
+
+mobilityBA_offspring + mobilityBA_Gen3 + plot_layout(guides = "collect", nrow = 2) 
+```
+
+#### NOT INCLUDED: Survival analysis using alternative biological aging measures
+
+Survival analysis by biological-aging measure (all regressions control for participant age and sex)
+
+Mortality
+
+```{r echo = FALSE}
+# Writing function
+surv_reg_raw <- function(pred_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(base_offspring_df, pred_var)) + Age + sex, data = base_offspring_df)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(base_offspring_df, pred_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+pred_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+bioagesurv_table =
+  map_dfr(pred_list, surv_reg_raw, .id = "variable") %>%
+  rename("BioAge measure" = variable,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(`BioAge measure` = factor(`BioAge measure`, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock")))
+
+bioagesurv_table %>%
+  knitr::kable(align = "lccccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE)
+```
+
+Survival analysis for educational attainment and educational mobility (All regressions control for participant age)
+
+Mortality - Full available samples
+
+```{r echo = FALSE}
+# Writing function
+surv_reg_raw <- function(pred_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(base_offspring_df, pred_var)) + Age + sex, data = base_offspring_df)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(base_offspring_df, pred_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+pred_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", education_std = "education_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+
+rawsurv_table =
+  map_dfr(pred_list, surv_reg_raw, .id = "variable") %>%
+  rename("Predictor" = variable,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("Dunedin_PoAm45", "education_std", "dmob_std", "rmob_std"), labels = c("DunedinPACE", "Educational Attainment", "Mobility (Delta)", "Mobility (Resid)")))
+  
+```
+
+```{r echo = F}
+# Writing function
+surv_reg_adj <- function(ed_var, bioage_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(base_offspring_df, ed_var)) + scale(pull(base_offspring_df, bioage_var)) + Age + sex, data = base_offspring_df)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(base_offspring_df, ed_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+edvar_list = list(education_std = "education_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+BA_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+survadj_reg_list = 
+  list(edvar_list = edvar_list, BA_list = BA_list)
+survadj_reg_listcombo = 
+  cross_df(survadj_reg_list)
+
+# Apply function
+survadj_reg_output =
+  pmap_dfr(list(survadj_reg_listcombo$edvar_list, survadj_reg_listcombo$BA_list), surv_reg_adj) %>%
+  cbind(survadj_reg_listcombo) %>%
+  dplyr::select(edvar_list, BA_list, everything()) %>%
+  rename("Predictor" = edvar_list,
+         "BioAge" = BA_list,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("education_std", "dmob_std", "rmob_std"), labels = c("Educational Attainment", "Mobility (Delta)", "Mobility (Resid)")),
+         BioAge = factor(BioAge, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock")),
+         p = format(ifelse(p < 0.001, "<0.001", as.character(round(p, 4))), nsmall = 4)) %>%
+  mutate(Predictor = paste(Predictor, "+", BioAge, sep = " ")) %>%
+  dplyr::select(-BioAge) %>%
+  arrange(Predictor)
+
+rbind(rawsurv_table, survadj_reg_output) %>%
+  mutate(Predictor = as.character(Predictor)) %>%
+  arrange(Predictor) %>%
+  knitr::kable(align = "lccccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE)
+```
+
+Mortality - mobility sample only
+
+```{r echo = FALSE}
+
+# Writing function
+surv_reg_raw <- function(pred_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(mobilityoffspring_df, pred_var)) + Age + sex, data = mobilityoffspring_df)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(mobilityoffspring_df, pred_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+pred_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", education_std = "education_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+
+rawsurv_table =
+  map_dfr(pred_list, surv_reg_raw, .id = "variable") %>%
+  rename("Predictor" = variable,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("Dunedin_PoAm45", "education_std", "dmob_std", "rmob_std"), labels = c("DunedinPACE", "Educational Attainment", "Mobility (Delta)", "Mobility (Resid)")))
+  
+```
+
+```{r echo = F}
+# Writing function
+surv_reg_adj <- function(ed_var, bioage_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(mobilityoffspring_df, ed_var)) + scale(pull(mobilityoffspring_df, bioage_var)) + Age + sex, data = mobilityoffspring_df)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(mobilityoffspring_df, ed_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+edvar_list = list(education_std = "education_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+BA_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+survadj_reg_list = 
+  list(edvar_list = edvar_list, BA_list = BA_list)
+survadj_reg_listcombo = 
+  cross_df(survadj_reg_list)
+
+# Apply function
+survadj_reg_output =
+  pmap_dfr(list(survadj_reg_listcombo$edvar_list, survadj_reg_listcombo$BA_list), surv_reg_adj) %>%
+  cbind(survadj_reg_listcombo) %>%
+  dplyr::select(edvar_list, BA_list, everything()) %>%
+  rename("Predictor" = edvar_list,
+         "BioAge" = BA_list,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("education_std", "dmob_std", "rmob_std"), labels = c("Educational Attainment", "Mobility (Delta)", "Mobility (Resid)")),
+         BioAge = factor(BioAge, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock")),
+         p = format(ifelse(p < 0.001, "<0.001", as.character(round(p, 4))), nsmall = 4)) %>%
+  mutate(Predictor = paste(Predictor, "+", BioAge, sep = " ")) %>%
+  dplyr::select(-BioAge) %>%
+  arrange(Predictor)
+
+rbind(rawsurv_table, survadj_reg_output) %>%
+  mutate(Predictor = as.character(Predictor)) %>%
+  arrange(Predictor) %>%
+  knitr::kable(align = "lccccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE)
+```
+
+Pace of Aging by chronological age
+
+```{r echo = FALSE, warning = F}
+full_poa45byage =
+  base_df %>%
+  mutate(cohort_bysex = ifelse(cohort == "Offspring" & sex == "Male", "Offspring - Men",
+                        ifelse(cohort == "Offspring" & sex == "Female", "Offspring - Women",
+                        ifelse(cohort == "GEN3" & sex == "Male", "Gen3 - Men",
+                        ifelse(cohort == "GEN3" & sex == "Female", "Gen3 - Women", NA))))) %>%
+  filter(!is.na(cohort_bysex)) %>%
+  ggplot(aes(Age, Dunedin_PoAm45,
+              color = cohort_bysex)) +
+  geom_point(alpha = 0.4, size = 0.5) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth") +
+  theme_minimal() +
+  xlab("Age")+
+  ylab("DunedinPoAm45") +
+  theme(legend.title = element_blank()) +
+  scale_color_viridis_d()
+
+mobility_poa45byage =
+  mobility_df %>%
+  mutate(cohort_bysex = ifelse(cohort == "Offspring" & sex == "Male", "Offspring - Men",
+                        ifelse(cohort == "Offspring" & sex == "Female", "Offspring - Women",
+                        ifelse(cohort == "GEN3" & sex == "Male", "Gen3 - Men",
+                        ifelse(cohort == "GEN3" & sex == "Female", "Gen3 - Women", NA))))) %>%
+  filter(!is.na(cohort_bysex)) %>%
+  ggplot(aes(Age, Dunedin_PoAm45,
+              color = cohort_bysex)) +
+  geom_point(alpha = 0.4, size = 0.5) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth") +
+  theme_minimal() +
+  xlab("Age")+
+  ylab("DunedinPoAm45") +
+  theme(legend.title = element_blank()) +
+  scale_color_viridis_d()
+
+full_poa45byage + mobility_poa45byage + plot_layout(guides = "collect")
+```
+
+Mobility by highest parental education
+
+```{r echo = FALSE}
+dmob_maxpared_std =
+  mobility_df %>%
+  ggplot(aes(maxpared_std, dmob_std,
+              color = cohort)) +
+  geom_point(alpha = 0.4, size = 0.5) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth") +
+  theme_minimal() +
+  xlab("Highest Parental Education") +
+  ylab("Mobility (Delta)") +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1")
+
+rmob_maxpared_std =
+  mobility_df %>%
+  ggplot(aes(maxpared_std, rmob_std,
+              color = cohort)) +
+  geom_point(alpha = 0.4, size = 0.5) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth") +
+  theme_minimal() +
+  xlab("Highest Parental Education") +
+  ylab("Mobility (Resid)") +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1")
+
+dmob_maxpared_std + rmob_maxpared_std + plot_layout(guides = "collect")
+```
+
+```{r echo = FALSE, warnings = F, message = F}
+mobility_df = 
+  mobility_df %>%
+  mutate(rmobstd_resid = residuals(lm(rmob_std ~ Age)))
+
+mobility_df = 
+  mobility_df %>%
+  mutate(mean_mobcat = ifelse(rmobstd_resid < -0.9252221, "Downward",
+                        ifelse(rmobstd_resid > 0.9252221, "Upward", "Stable"))) %>%
+  mutate(mean_mobcat = factor(mean_mobcat, levels = c("Downward", "Stable", "Upward")))
+
+bioage_mobility_table =
+  mobility_df %>%
+  dplyr::select(cohort, mean_mobcat, Dunedin_PoAm45) %>%
+  group_by(cohort, mean_mobcat) %>%
+  dplyr::summarize(DunedinPACE = mean(Dunedin_PoAm45, na.rm=TRUE),
+                   SD = sd(Dunedin_PoAm45, na.rm=TRUE))
+
+offspring_boxplot =
+  mobility_df %>%
+  filter(cohort == "Offspring") %>%
+  ggplot() +
+  geom_boxplot(aes(x=mean_mobcat, y=Dunedin_PoAm45, fill=mean_mobcat), alpha = 0.5, na.rm=TRUE) +
+  theme_minimal() +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        legend.position = "none") +
+  ylim(0.5,1.8) +
+  labs(title = "Offspring", fill = "Mobility category") +
+  scale_fill_manual(values = c("firebrick3", "darkgrey", "dodgerblue3"))
+
+Gen3_boxplot =
+  mobility_df %>%
+  filter(cohort == "GEN3") %>%
+  ggplot() +
+  geom_boxplot(aes(x=mean_mobcat, y=Dunedin_PoAm45, fill=mean_mobcat), alpha = 0.5, na.rm=TRUE) +
+  theme_minimal() +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        legend.position = "none") +
+  ylim(0.5,1.8) +
+  labs(title = "Gen3", fill = "Mobility category") +
+  scale_fill_manual(values = c("firebrick3", "darkgrey", "dodgerblue3"))
+
+offspring_boxplot + Gen3_boxplot + plot_layout(guides = "collect")
+```
+
+Mean bio-age advancement by mobility category (rmob variable residualized for age)
+
+```{r echo = FALSE}
+mobilityBA_offspring =
+  mobilityoffspring_df %>%
+  dplyr::select(dbGaP_Subject_ID, rmob_std, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(rmob_std, Dunedin_PoAm45)) +
+  geom_point(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  labs(title="Offspring Cohort", x = "Educational mobility (Residualized-change)", y = "DunedinPACE") +
+  ylim(-3,3) +
+  xlim(-3,3)
+
+mobilityBA_Gen3 =
+  mobilityGen3_df %>%
+  dplyr::select(dbGaP_Subject_ID, rmob_std, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(rmob_std, Dunedin_PoAm45)) +
+  geom_point(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  labs(title="Gen3 Cohort", x = "Educational mobility (Residualized-change)", y = "DunedinPACE") +
+  ylim(-3,3) +
+  xlim(-3,3)
+
+mobilityBA_offspring + mobilityBA_Gen3 + plot_layout(guides = "collect") 
+```
+
+Sibling differences in DunedinPACE and years of education
+
+```{r echo = FALSE}
+sibplot_df =
+  sibling_df %>%
+  group_by(sibgroupid) %>%
+  mutate(sibmean_DunedinPACE = mean(Dunedin_PoAm45),
+         sibmean_edyrs = mean(education_cont)) %>%
+  ungroup() %>%
+  mutate(PACEdiff = Dunedin_PoAm45 - sibmean_DunedinPACE,
+         eddiff = education_cont - sibmean_edyrs) %>%
+  select(dbGaP_Subject_ID, cohort, sibgroupid,
+         Dunedin_PoAm45, sibmean_DunedinPACE, PACEdiff,
+         education_cont, sibmean_edyrs, eddiff) %>%
+  mutate(eddiff_cat = ifelse(eddiff < -0.5, ">=1 year less",
+                             ifelse(eddiff > 0.5, ">= 1 year more", "Within 1 year"))) %>%
+  mutate(eddiff_cat = factor(eddiff_cat, levels = c(">=1 year less", "Within 1 year", ">= 1 year more")))
+
+sibplot_df %>%
+  ggplot() +
+  geom_boxplot(aes(x=eddiff_cat, y=Dunedin_PoAm45, fill=eddiff_cat), alpha = 0.5, na.rm=TRUE) +
+  theme_minimal() +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        legend.position = "none") +
+  ylim(0.5,1.8) +
+  labs(fill = "Relative educational attainment (years)") +
+  scale_fill_manual(values = c("firebrick3", "darkgrey", "dodgerblue3"))
+```
+
+Mean bio-age advancement by education (residualized-mobility)
+
+```{r echo = FALSE}
+paredBA_offspring =
+  mobilityoffspring_df %>%
+  dplyr::select(dbGaP_Subject_ID, maxpared_cont, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(maxpared_cont, Dunedin_PoAm45)) +
+  geom_jitter(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  labs(title="Offspring Cohort", x = "Parental education (years)", y = "DunedinPACE") +
+  ylim(-3,3) +
+  xlim(5,20)
+
+ownedBA_offspring =
+  mobilityoffspring_df %>%
+  dplyr::select(dbGaP_Subject_ID, education_cont, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(education_cont, Dunedin_PoAm45)) +
+  geom_jitter(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  labs(title="Offspring Cohort", x = "Educational attainment (years)", y = "DunedinPACE") +
+  ylim(-3,3) +
+  xlim(5,20)
+
+mobilityBA_offspring =
+  mobilityoffspring_df %>%
+  dplyr::select(dbGaP_Subject_ID, rmob_cont, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(rmob_cont, Dunedin_PoAm45)) +
+  geom_jitter(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  labs(title="Offspring Cohort", x = "Educational mobility (years)", y = "DunedinPACE") +
+  ylim(-3,3) +
+  xlim(-10,10)
+
+paredBA_Gen3 =
+  mobilityGen3_df %>%
+  dplyr::select(dbGaP_Subject_ID, maxpared_cont, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(maxpared_cont, Dunedin_PoAm45)) +
+  geom_jitter(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  labs(title="Gen3 Cohort", x = "Parental education (years)", y = "DunedinPACE") +
+  ylim(-3,3) +
+  xlim(5,20)
+
+ownedBA_Gen3 =
+  mobilityGen3_df %>%
+  dplyr::select(dbGaP_Subject_ID, education_cont, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(education_cont, Dunedin_PoAm45)) +
+  geom_jitter(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  labs(title="Gen3 Cohort", x = "Educational attainment (years)", y = "DunedinPACE") +
+  ylim(-3,3) +
+  xlim(5,20)
+
+mobilityBA_Gen3 =
+  mobilityGen3_df %>%
+  dplyr::select(dbGaP_Subject_ID, rmob_cont, Dunedin_PoAm45) %>%
+  mutate(Dunedin_PoAm45 = scale(Dunedin_PoAm45)) %>%
+  ggplot(aes(rmob_cont, Dunedin_PoAm45)) +
+  geom_jitter(alpha = 0.15, size = 0.4, na.rm=TRUE) +
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth",
+              se = T,
+              alpha = 0.2,
+              size = 0.7, 
+              na.rm=TRUE) +
+  theme_minimal() +
+  labs(title="Gen3 Cohort", x = "Educational mobility (years)", y = "DunedinPACE") +
+  ylim(-3,3) +
+  xlim(-10,10)
+
+paredBA_offspring + ownedBA_offspring + mobilityBA_offspring + 
+  paredBA_Gen3 + ownedBA_Gen3 + mobilityBA_Gen3 + 
+  plot_layout(guides = "collect") 
+```
+
+
+### Supplemental analysis by college education
+
+```{r echo = FALSE}
+#Temporary analysis of some vs. no college
+education_df =
+  education_df %>%
+  mutate(college = ifelse(education_cont > 16, "yes", "no"))
+
+nocollege_df =
+  education_df %>%
+  filter(college == "no")
+    
+somecollege_df =
+  education_df %>%
+  filter(college == "yes")
+
+education_df %>%
+  ggplot() +
+  geom_boxplot(aes(x = college, y=rmob_std))
+  
+```
+
+#### Educational gradient in mortality
+
+```{r echo = FALSE}
+edmort_df =
+  somecollege_df %>%
+  filter(cohort == "Offspring", !is.na(T_mort), !is.na(mort_status)) 
+
+mobmort_df =
+  somecollege_df %>%
+  filter(cohort == "Offspring", !is.na(T_mort), !is.na(mort_status), !is.na(rmob_std))
+
+# Writing function
+surv_reg_raw <- function(sample, pred_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(sample, pred_var)) + Age + sex, data = sample)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(sample, pred_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+sample_list = list(edmort_df = edmort_df, mobmort_df = mobmort_df)
+samplename_list = list("Offspring Education Sample" = "Education Sample", "Mediation Sample" = "Mediation Sample")
+pred_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid", education_std = "education_std", maxpared_std = "maxpared_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+
+demsurv_reg_list = 
+  list(sample_list = sample_list, pred_list = pred_list)
+demsurv_reg_listcombo = 
+  cross_df(demsurv_reg_list)
+
+demsurv_reg_namelist = 
+  list(samplename_list = samplename_list, pred_list = pred_list)
+demsurv_reg_namelistcombo = 
+  cross_df(demsurv_reg_namelist)
+
+pmap_dfr(list(demsurv_reg_listcombo$sample_list, demsurv_reg_listcombo$pred_list), surv_reg_raw) %>%
+  cbind(demsurv_reg_namelistcombo) %>%
+  select(samplename_list, pred_list, N, Events, estimate, CI, p.value) %>%
+  rename("Predictor" = pred_list,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid", "education_std", "maxpared_std", "dmob_std", "rmob_std"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock", "Educational Attainment", "Parental Education", "Mobility (Delta)", "Mobility (Resid)"))) %>%
+  arrange(Predictor, samplename_list) %>%
+  filter((samplename_list == "Mediation Sample")|
+          (samplename_list == "Education Sample" & Predictor %in% c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock")) |
+           (samplename_list == "Education Sample" & Predictor == "Educational Attainment")
+           ) %>%
+  arrange(samplename_list, Predictor) %>%
+  select(-samplename_list, -N) %>%
+  knitr::kable(align = "lcccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  pack_rows("College-educated education sample (n=508)", 1, 6) %>%
+  pack_rows("College-educated mediation Sample (n=365)", 7, 15)
+```
+
+No college
+
+```{r echo = FALSE}
+edmort_df =
+  nocollege_df %>%
+  filter(cohort == "Offspring", !is.na(T_mort), !is.na(mort_status)) 
+
+mobmort_df =
+  nocollege_df %>%
+  filter(cohort == "Offspring", !is.na(T_mort), !is.na(mort_status), !is.na(rmob_std))
+
+# Writing function
+surv_reg_raw <- function(sample, pred_var) {
+  
+  object = coxph(Surv(T_mort, mort_status) ~ scale(pull(sample, pred_var)) + Age + sex, data = sample)
+  
+  reg_output =
+    object %>%
+    broom::tidy(conf.int = T, exp = T) %>%
+    filter(term == "scale(pull(sample, pred_var))") %>%
+    mutate(conf.low = format(round(conf.low, digits = 2), nsmall = 2),
+           conf.high = format(round(conf.high, digits = 2), nsmall = 2),
+           estimate = format(round(estimate, digits = 2), nsmall = 2),
+           p.value = format(ifelse(p.value < 0.001, "<0.001", as.character(round(p.value, 4))), nsmall = 4),
+           CI = paste("(", conf.low, ",", conf.high, ")", sep = "")) %>%
+    dplyr::select(estimate, CI, p.value)
+
+    N = object[["n"]] %>% as.data.frame()
+    colnames(N) <- c("N")
+    
+    Nevents = object[["nevent"]] %>% as.data.frame()
+    colnames(Nevents) <- c("Events")
+
+    cbind(reg_output, N, Nevents) %>%
+      dplyr::select(N, Events, estimate, CI, p.value)
+    
+}
+
+# Create input list
+sample_list = list(edmort_df = edmort_df, mobmort_df = mobmort_df)
+samplename_list = list("Offspring Education Sample" = "Education Sample", "Mediation Sample" = "Mediation Sample")
+pred_list = list(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid", education_std = "education_std", maxpared_std = "maxpared_std", dmob_std = "dmob_std", rmob_std = "rmob_std")
+
+demsurv_reg_list = 
+  list(sample_list = sample_list, pred_list = pred_list)
+demsurv_reg_listcombo = 
+  cross_df(demsurv_reg_list)
+
+demsurv_reg_namelist = 
+  list(samplename_list = samplename_list, pred_list = pred_list)
+demsurv_reg_namelistcombo = 
+  cross_df(demsurv_reg_namelist)
+
+pmap_dfr(list(demsurv_reg_listcombo$sample_list, demsurv_reg_listcombo$pred_list), surv_reg_raw) %>%
+  cbind(demsurv_reg_namelistcombo) %>%
+  select(samplename_list, pred_list, N, Events, estimate, CI, p.value) %>%
+  rename("Predictor" = pred_list,
+         "HR" = estimate,
+         "p" = p.value) %>%
+  mutate(Predictor = factor(Predictor, levels = c("Dunedin_PoAm45", "DNAmAge_resid", "DNAmAgeHannum_resid", "DNAmPhenoAge_resid", "DNAmGrimAge_resid", "education_std", "maxpared_std", "dmob_std", "rmob_std"), labels = c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock", "Educational Attainment", "Parental Education", "Mobility (Delta)", "Mobility (Resid)"))) %>%
+  arrange(Predictor, samplename_list) %>%
+  filter((samplename_list == "Mediation Sample")|
+          (samplename_list == "Education Sample" & Predictor %in% c("DunedinPACE", "Horvath Clock", "Hannum Clock", "PhenoAge Clock", "GrimAge Clock")) |
+           (samplename_list == "Education Sample" & Predictor == "Educational Attainment")
+           ) %>%
+  arrange(samplename_list, Predictor) %>%
+  select(-samplename_list, -N) %>%
+  knitr::kable(align = "lcccc") %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  pack_rows("Non-college-educated education sample (n=1903)", 1, 6) %>%
+  pack_rows("Non-college-educated mediation sample (n=1283)", 7, 15)
+```
+
+#### Mediation of educational gradient in mortality among college-education sample
+
+```{r echo = F, include = F}
+somecollege_mobility_df = 
+  somecollege_df %>%
+  filter(cohort == "Offspring", !is.na(T_mort), !is.na(mort_status), !is.na(rmob_std))
+
+med_fn = function(BAmeasure){
+  
+  step1 =
+     cmest(
+       data = somecollege_mobility_df,
+       model = "rb",
+       full = TRUE,
+       inference = "bootstrap",
+       outcome = "T_mort",
+       event = "mort_status",
+       exposure = "rmob_std",
+       mediator = BAmeasure,
+       EMint = TRUE,
+       basec = c("Age", "sex"),
+       mreg = list("linear"),
+       yreg = "coxph",
+       mval = list(0),
+       astar = 0,
+       a = 1,
+       basecval = NULL,
+       nboot = 50,
+       multimp = FALSE
+     )
+  
+out =
+  rbind(step1$effect.pe, step1$effect.ci.low, step1$effect.ci.high) %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  dplyr::select(rte, rcde, rpnde, rtnie, rtnde, rpnie, pm) %>%
+  t() %>%
+  as.data.frame()
+
+ colnames(out) = c("estimate", "lowerCI", "upperCI")
+
+ test =
+   out %>%
+   rownames_to_column() %>%
+   mutate(estimate = format(round(estimate, digits = 2), nsmall = 2),
+          lowerCI = format(round(lowerCI, digits = 2), nsmall = 2),
+          upperCI = format(round(upperCI, digits = 2), nsmall = 2)
+      ) %>%
+   mutate(CI = paste("(",lowerCI,",",upperCI,")", sep = "")) %>%
+   rename(effect = rowname) %>%
+   dplyr::select(effect, estimate, CI) %>%
+   pivot_wider(names_from = effect, values_from = c(estimate, CI))
+
+  n = nobs(step1$reg.output$yreg)
+  
+  cbind(test, n)
+  
+}
+
+
+BAmeasure_list = c(Dunedin_PoAm45 = "Dunedin_PoAm45", DNAmAge_resid = "DNAmAge_resid", DNAmAgeHannum_resid = "DNAmAgeHannum_resid", DNAmPhenoAge_resid = "DNAmPhenoAge_resid", DNAmGrimAge_resid = "DNAmGrimAge_resid")
+
+output = 
+  map_df(BAmeasure_list, med_fn, .id = "bioage_measure") %>%
+  dplyr::mutate(bioage_measure =
+          ifelse(bioage_measure == "Dunedin_PoAm45", "DunedinPACE",
+          ifelse(bioage_measure == "DNAmAge_resid", "Horvath Clock",
+          ifelse(bioage_measure == "DNAmAgeHannum_resid", "Hannum Clock",
+          ifelse(bioage_measure == "DNAmPhenoAge_resid", "PhenoAge Clock",
+          ifelse(bioage_measure == "DNAmGrimAge_resid", "GrimAge Clock", bioage_measure)))))) %>%
+  dplyr::select(-n) %>%
+  pivot_longer(c(estimate_rte:CI_pm)) %>%
+  separate(name, into = c("estimate", "effect")) %>%
+  pivot_wider(names_from = "estimate", values_from = "value")
+```
+
+```{r echo = FALSE}
+output %>%
+  mutate(estimate = as.numeric(estimate)) %>%
+  knitr::kable(col.names = c("Biological Aging Measure", "Effect", "Estimate", "CI")) %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0,bold=TRUE) 
+```

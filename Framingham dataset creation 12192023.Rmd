@@ -1,0 +1,310 @@
+---
+title: "Framingham dataset creation 04202023"
+author: "Gloria Huei-Jong Graf"
+date: "12/19/2023"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r packages, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(foreign)
+library(haven)
+library(kableExtra)
+```
+
+Loading basic datasets
+
+```{r load-data, include=FALSE}
+# race data should be in phenotype data- race_allcohorts.dta - just see how much missing data there is
+
+setwd("/Users/gloriagraf/Documents/Research with DB/Framingham Mobility/Data/")
+
+subjects_df = read.csv("framingham_subjects.csv") %>% select(dbGaP_Subject_ID, idtype, cohort, shareid) %>% filter(!is.na(dbGaP_Subject_ID)) %>% mutate(dbGaP_Subject_ID = as.numeric(dbGaP_Subject_ID))
+
+bioage_df = read.csv("framingham_dnamage_MK04082021.csv") %>% select(dbGaP_Subject_ID, Age, age2, age8, date8, CD4T, CD8T, NK, Bcell, Mono, Gran, propNeuron, Dunedin_PoAm38, Dunedin_PoAm45, DNAmAge, DNAmAge_resid, DNAmPhenoAge, DNAmPhenoAge_resid, DNAmAgeHannum, DNAmAgeHannum_resid, DNAmGrimAge, DNAmGrimAge_resid)
+
+smoking_df = read_dta("Smoking_OffspringEx8.dta") %>% select(dbgap_subject_id, smknow, cpd) %>% rename(dbGaP_Subject_ID = dbgap_subject_id)
+
+mortality_df = read_dta("Survival_AllCohorts_v33.dta") %>%
+  mutate(dbGaP_Subject_ID = as.numeric(dbgap_subject_id)) %>%
+  select(dbGaP_Subject_ID, dead, dth_survdate, idtype) %>%
+  mutate(mort_status = dead,
+         T_mort = dth_survdate)
+
+dementia_df = read_dta("Dementia_AllCohorts_v33.dta") %>%
+  mutate(dbGaP_Subject_ID = as.numeric(dbgap_subject_id)) %>%
+  select(dbgap_subject_id, dem_status, dem_survdate, idtype) %>%
+  mutate(dbGaP_Subject_ID = dbgap_subject_id,
+         dem_status = dem_status,
+         T_dem = dem_survdate)
+
+education_df = read_dta("FraminghamEducationalMobility_Step2alt_12192023.dta") %>%
+  dplyr::select(dbgap_subject_id, sex, birthyr, fshare, mshare,
+                #own education in educ and neuropsych dataset
+                eayrs33, maxeayrs,
+                #mom's education in educ and neuropsych dataset
+                f_ea33, f_maxeayrs, 
+                #dad's education in educ and neuropsych dataset
+                m_ea33, m_maxeayrs, 
+                #max parental education in educ and neuropsych dataset
+                fam_ea33, fam_maxeayrs, 
+                #standardized education in harmonized sample
+                zed, f_zed, m_zed, fam_zed,
+                #delta mobility in raw years and z-scores
+                absmob, edmob,
+                #residualized mobility in raw years and z-score
+                redmob) %>%
+  rename(dbGaP_Subject_ID = dbgap_subject_id,
+         birthcohort_5yr = birthyr) %>%
+  mutate(f_eayrs33 = ifelse(f_ea33 == 1, 10,
+                  ifelse(f_ea33 == 2, 12,
+                  ifelse(f_ea33 == 3, 14,
+                  ifelse(f_ea33 == 4, 16, NA)))),
+         m_eayrs33 = ifelse(m_ea33 == 1, 10,
+                  ifelse(m_ea33 == 2, 12,
+                  ifelse(m_ea33 == 3, 14,
+                  ifelse(m_ea33 == 4, 16, NA)))),
+         fam_eayrs33 = ifelse(fam_ea33 == 1, 10,
+                  ifelse(fam_ea33 == 2, 12,
+                  ifelse(fam_ea33 == 3, 14,
+                  ifelse(fam_ea33 == 4, 16, NA))))) %>%
+  mutate(education_cont = ifelse(!is.na(maxeayrs), maxeayrs, eayrs33),
+         momed_cont = ifelse(!is.na(m_maxeayrs), m_maxeayrs, m_eayrs33),
+         daded_cont = ifelse(!is.na(f_maxeayrs), f_maxeayrs, f_eayrs33),
+         maxpared_cont = ifelse(!is.na(fam_maxeayrs), fam_maxeayrs, fam_eayrs33)) %>%
+  mutate(rmob_cont = residuals(lm(education_cont ~ maxpared_cont, data = ., na.action=na.exclude))) %>%
+  rename(education_std = zed,
+         momed_std = m_zed,
+         daded_std = f_zed,
+         maxpared_std = fam_zed,
+         dmob_cont = absmob,
+         dmob_std = edmob,
+         rmob_std = redmob)
+
+race_df = read_dta("Race_AllCohorts_v33.dta") %>%
+  mutate(race_char = factor(race, levels = c(0, 1, 2, 3, 4, 5), 
+                            labels = c("White", "Black", "Asian", "HPI", "AIAN", NA)),
+          dbGaP_Subject_ID = as.numeric(dbgap_subject_id)) %>%
+  select(dbGaP_Subject_ID, race, race_char)
+
+# survival_df = read_dta("framingham_survival.dta") %>% select(dbGaP_Subject_ID, dem_status, T_dem) %>% mutate(dbGaP_Subject_ID = as.numeric(dbGaP_Subject_ID))
+```
+
+### Combining Offspring and Gen3 cohort datasets; creation of mobility and sibling groups
+
+Creating base dataset from which all data are drawn
+
+```{r}
+base_df =
+  left_join(subjects_df, bioage_df) %>%
+  left_join(mortality_df) %>%
+  left_join(dementia_df) %>%
+  left_join(smoking_df) %>%
+  left_join(education_df) %>%
+  left_join(race_df)
+
+# Creating survival dates
+base_df =
+  base_df %>%
+  mutate(cohort = ifelse(idtype == 0, "Original",
+                  ifelse(idtype %in% c(1,2), "Offspring",
+                  ifelse(idtype == 3, "GEN3", NA))),
+          T_mort = (T_mort-date8)/365,
+          T_dem = (T_dem-date8)/365) %>%
+  filter(cohort %in% c("Offspring", "GEN3"))
+
+# test = base_df %>%
+#   filter(!is.na(education_cont))
+
+# Creating mobility residuals based on years of education
+rmob_cont_df =
+  left_join(education_df, subjects_df, by = "dbGaP_Subject_ID") %>%
+  drop_na(any_of(c("education_cont", "maxpared_cont"))) %>%
+  group_by(cohort) %>% 
+  mutate(rmob_cont = residuals(lm(education_cont ~ maxpared_cont))) %>%
+  ungroup() %>%
+  select(dbGaP_Subject_ID, rmob_cont)
+
+base_df = 
+  left_join(base_df, rmob_cont_df)
+
+# Creating sibling clusters
+sibcluster_df =  
+  base_df %>%
+  select(dbGaP_Subject_ID, education_std, fshare, mshare) %>%
+  mutate(sibgroupid = ifelse(!is.na(fshare) & !is.na(mshare), paste(fshare, mshare, sep = ""), paste("x", rownames(.), sep = "-"))) %>%
+  group_by(sibgroupid) %>%
+  mutate(sum_ed = sum(education_std, na.rm = T),
+       n = n(),
+       avg_sib_edu = if_else(n == 1, NA_real_, sum_ed/(n)),
+       avg_sib_edu = if_else(sum_ed == 0, NA_real_, avg_sib_edu),
+       avg_sib_edu = if_else(is.na(sibgroupid), NA_real_, avg_sib_edu)) %>%
+  ungroup() %>%
+  select(dbGaP_Subject_ID, sibgroupid, avg_sib_edu)
+
+base_df =
+  left_join(base_df, sibcluster_df)
+```
+
+### Save analysis dataset (code to create subsets below)
+
+We then remove subjects join biological aging data to this dataset and keep all participants with biological aging data and subject IDs.
+
+-   DNAm dataset (DNAm_df): all participants with biological aging data and subject IDs (n=3936, offspring cohort n=2479, Gen3 cohort n=1457)
+-   Education subsample (education_df): all DNAm participants with death and own education data (n=3874, offspring cohort n=1456, Gen3 cohort n=2418)
+-   Mobility subsample (mobility_df): all participants educational mobility data (n=3101, offspring cohort n=1652, Gen3 cohort n=1449)
+-   Sibling subsample (sibling_df): all participants with educational mobility data with siblings (n=2437, 887 sibling clusters)
+
+```{r}
+write.csv(base_df, "/Users/gloriagraf/Documents/Research with DB/Framingham Mobility/Data/combined_framingham_data_01252024.csv")
+
+# Creating analysis subsets
+DNAm_df =
+  base_df %>%
+  filter(!is.na(DNAmAge))
+
+educationsample_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & !is.na(education_std))
+
+mobility_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & !is.na(rmob_std))
+
+sibling_df =
+  base_df %>%
+  filter(!is.na(DNAmAge) & !is.na(education_std) & !is.na(sibgroupid)) %>%
+  group_by(sibgroupid) %>%
+  mutate(famfreq = n()) %>%
+  filter(famfreq >=2)
+```
+
+### Characteristics of education sample
+```{r echo = F, message=F}
+education_df %>%
+  group_by(sex, birthcohort_5yr) %>%
+  filter(!is.na(birthcohort_5yr), !is.na(education_std)) %>%
+  summarise(n = n(),
+            mean = mean(education_cont, na.rm=T), 
+            SD = sd(education_cont, na.rm=T)) %>%
+  mutate(n = as.character(format(round(n, digits = 2), nsmall = 0)),
+         mean = as.character(round(mean, digits = 1)),
+         SD = as.character(round(SD, digits = 1))) %>%
+  mutate(sex = ifelse(sex == 1, "Male",
+                ifelse(sex == 2, "Female", NA))) %>%
+  filter(sex %in% c("Female", "Male")) %>%
+  pivot_longer(c("n", "mean", "SD"), names_to = "Birth Cohort", values_to = "Value") %>%
+  pivot_wider(names_from = birthcohort_5yr, values_from = "Value") %>%
+  ungroup() %>%
+  dplyr::select(-sex) %>%
+  knitr::kable() %>%
+  kableExtra::kable_classic(html_font = "Times New Roman") %>%
+  row_spec(0, bold=TRUE) %>%
+  pack_rows("Men (n=6258)", 1, 3) %>%
+  pack_rows("Women (n=7578)", 4, 6)
+```
+
+```{r echo = F}
+owned_yrs_chart =
+  mobility_df %>%
+  mutate(cohort = factor(cohort, levels = c("Offspring", "GEN3"))) %>%
+  ggplot(aes(education_cont, color = cohort, fill = cohort)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  xlab("Educational Attainment (Years)") +
+  ylab(element_blank()) +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+owned_std_chart =
+  mobility_df %>%
+  mutate(cohort = factor(cohort, levels = c("Offspring", "GEN3"))) %>%
+  ggplot(aes(education_std, color = cohort, fill = cohort)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  xlab("Educational Attainment (Std.)") +
+  ylab(element_blank()) +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+pared_yrs_chart =
+  mobility_df %>%
+  mutate(cohort = factor(cohort, levels = c("Offspring", "GEN3"))) %>%
+  ggplot(aes(maxpared_cont, color = cohort, fill = cohort)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  xlab("Highest Parental Education (Years)") +
+  ylab(element_blank()) +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+pared_std_chart =
+  mobility_df %>%
+  mutate(cohort = factor(cohort, levels = c("Offspring", "GEN3"))) %>%
+  ggplot(aes(maxpared_std, color = cohort, fill = cohort)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  xlab("Highest Parental Education (Std.)") +
+  ylab(element_blank()) +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+dmob_yrs_chart =
+  mobility_df %>%
+  mutate(cohort = factor(cohort, levels = c("Offspring", "GEN3"))) %>%
+  ggplot(aes(dmob_cont, color = cohort, fill = cohort)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  xlab("Delta mobility (Years)") +
+  ylab(element_blank()) +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+dmob_std_chart =
+  mobility_df %>%
+  mutate(cohort = factor(cohort, levels = c("Offspring", "GEN3"))) %>%
+  ggplot(aes(dmob_std, color = cohort, fill = cohort)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  xlab("Delta Mobility (Std.)") +
+  ylab(element_blank()) +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+rmob_yrs_chart =
+  mobility_df %>%
+  mutate(cohort = factor(cohort, levels = c("Offspring", "GEN3"))) %>%
+  ggplot(aes(rmob_cont, color = cohort, fill = cohort)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  xlab("Delta mobility (Years)") +
+  ylab(element_blank()) +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+rmob_std_chart =
+  mobility_df %>%
+  mutate(cohort = factor(cohort, levels = c("Offspring", "GEN3"))) %>%
+  ggplot(aes(rmob_std, color = cohort, fill = cohort)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  xlab("Delta Mobility (Std.)") +
+  ylab(element_blank()) +
+  theme(legend.title = element_blank()) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+library(patchwork)
+
+owned_yrs_chart + owned_std_chart + pared_yrs_chart + pared_std_chart + dmob_yrs_chart + dmob_std_chart + rmob_yrs_chart + rmob_std_chart + plot_layout(guides = "collect", nrow = 4)
+```
